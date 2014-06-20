@@ -3,5 +3,5 @@ package main
 import "fmt"
 
 func main() {
-   fmt.Prinln("resource-expansion")
+   fmt.Println("resource-expansion")
 }
