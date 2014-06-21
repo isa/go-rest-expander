@@ -3,7 +3,6 @@ package expander
 import (
 	"fmt"
 	"reflect"
-	"strconv"
 )
 
 type Parametric interface {
@@ -14,32 +13,53 @@ func Expand(p Parametric, object interface{}) map[string]interface{} {
 	_ = p.GetString("expand")
 	result := make(map[string]interface{})
 
-	klazz := reflect.TypeOf(object)
-
-	// if a pointer to a struct is passed, get the type of the dereferenced object
-	if klazz.Kind() == reflect.Ptr {
-		klazz = klazz.Elem()
+	if object == nil {
+		return result
 	}
 
-	if klazz.Kind() != reflect.Struct {
-		//TODO: change it with logger
-		fmt.Printf("%v type can't have attributes inspected\n", klazz.Kind())
-		panic("wooow")
-	}
+	v := reflect.ValueOf(object)
 
-	for i := 0; i < klazz.NumField(); i++ {
-		p := klazz.Field(i)
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		ft := v.Type().Field(i)
 
-		if !p.Anonymous {
-			switch p.Type.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				result[p.Name] = strconv.FormatInt(p)
-			case reflect.String:
-				result[p.Name] = p.String()
-				// etc...
-			}
-		}
+		result[ft.Name] = getValueFrom(f)
 	}
 
 	return result
+}
+
+func getValueFrom(t reflect.Value) interface{} {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return t.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return t.Uint()
+	case reflect.Float32, reflect.Float64:
+		return t.Float()
+	case reflect.Bool:
+		return t.Bool()
+	case reflect.String:
+		return t.String()
+	case reflect.Slice:
+		var result []interface{}
+
+		for i := 0; i < t.Len(); i++ {
+			result = append(result, getValueFrom(t.Index(i)))
+		}
+
+		return result
+	case reflect.Map:
+		result := make(map[interface{}]interface{})
+
+		for _, v := range t.MapKeys() {
+			result[v] = getValueFrom(t.MapIndex(v))
+		}
+
+		return result
+	default:
+		fmt.Println("unsupported type...")
+	}
+
+	return ""
 }
