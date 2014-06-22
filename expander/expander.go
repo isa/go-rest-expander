@@ -11,21 +11,23 @@ type Modification struct {
 	Value string
 }
 
-func Expand(object interface{}, expansion, fields string) map[string]interface{} {
-	return typeWalker(object)
+type Modifications []Modification
+
+func Expand(data interface{}, expansion, fields string) map[string]interface{} {
+	return typeWalker(data)
 }
 
-func typeWalker(object interface{}) map[string]interface{} {
+func typeWalker(data interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	if object == nil {
+	if data == nil {
 		return result
 	}
 
-	v := reflect.ValueOf(object)
-	switch object.(type) {
+	v := reflect.ValueOf(data)
+	switch data.(type) {
 	case reflect.Value:
-		v = object.(reflect.Value)
+		v = data.(reflect.Value)
 	}
 
 	for i := 0; i < v.NumField(); i++ {
@@ -81,24 +83,54 @@ func getValueFrom(t reflect.Value) interface{} {
 	return ""
 }
 
-func buildModifyTree(expansion string) []Modification {
+func buildModifyTree(expansion string) ([]Modification, int) {
 	var result []Modification
-	const comma rune = ','
+	const comma uint8 = ','
+	const openBracket uint8 = '('
+	const closeBracket uint8 = ')'
 
 	if expansion == "*" {
-		return result
+		return result, -1
 	}
 
 	expansion = strings.Replace(expansion, " ", "", -1)
+	indexAfterSeparation := 0
+	closeIndex := 0
 
-	lastCommaIndex := 0
-	for i, b := range expansion {
-		if b == comma {
-			result = append(result, Modification{Value: string(expansion[lastCommaIndex:i])})
-			lastCommaIndex = i + 1
+	for i := 0; i < len(expansion); i++ {
+		switch expansion[i] {
+			case openBracket:
+				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+				modification.Children, closeIndex = buildModifyTree(expansion[i + 1:])
+				result = append(result, modification)
+				i = i + closeIndex
+				indexAfterSeparation = i + 1
+				closeIndex = indexAfterSeparation
+			case comma:
+				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+				if modification.Value != "" {
+					result = append(result, modification)
+				}
+				indexAfterSeparation = i + 1
+			case closeBracket:
+				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+				if modification.Value != "" {
+					result = append(result, modification)
+				}
+
+				return result, i + 1
 		}
 	}
-	result = append(result, Modification{Value: string(expansion[lastCommaIndex:])})
+
+	if indexAfterSeparation > closeIndex {
+		result = append(result, Modification{Value: string(expansion[indexAfterSeparation:])})
+	}
+
+	return result, -1
+}
+
+func filterOut(data interface{}, modifications Modifications) map[string]interface{} {
+	result := make(map[string]interface{})
 
 	return result
 }
