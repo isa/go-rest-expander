@@ -8,16 +8,9 @@ import (
 func TestExpander(t *testing.T) {
 
 	Convey("It should return empty key-values if the object is nil", t, func() {
-		result := Expand(nil, nil)
+		result := Expand(nil, "", "")
 
 		So(result, ShouldBeEmpty)
-	})
-
-	Convey("It should return all key-values that user defines", t, func() {
-		testController := new(DummyController)
-		_ = Expand(testController, nil)
-
-		So(testController.UsingExpandKey, ShouldEqual, true)
 	})
 
 	Convey("It should return a map of all the simple key-values that user defines if expand is *", t, func() {
@@ -29,9 +22,25 @@ func TestExpander(t *testing.T) {
 		expectedMap["ui"] = 1
 
 		singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+		result := Expand(singleLevel, "*", "")
 
-		testController := DummyController{ExpandingString: expectedMap}
-		result := Expand(&testController, singleLevel)
+		So(result["s"], ShouldEqual, expectedMap["s"])
+		So(result["b"], ShouldEqual, expectedMap["b"])
+		So(result["i"], ShouldEqual, expectedMap["i"])
+		So(result["f"], ShouldEqual, expectedMap["f"])
+		So(result["ui"], ShouldEqual, expectedMap["ui"])
+	})
+
+	Convey("It should assume expansion is * if no expansion parameter is given and return all the simple key-values that user defines", t, func() {
+		expectedMap := make(map[string]interface{})
+		expectedMap["s"] = "bar"
+		expectedMap["b"] = false
+		expectedMap["i"] = -1
+		expectedMap["f"] = 1.1
+		expectedMap["ui"] = 1
+
+		singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+		result := Expand(singleLevel, "*", "")
 
 		So(result["s"], ShouldEqual, expectedMap["s"])
 		So(result["b"], ShouldEqual, expectedMap["b"])
@@ -46,9 +55,7 @@ func TestExpander(t *testing.T) {
 		expectedMap["msb"] = map[string]bool{"key1": true, "key2": false}
 
 		singleMultiLevel := SimpleMultiLevel{expectedMap["si"].([]int), expectedMap["msb"].(map[string]bool)}
-
-		testController := DummyController{ExpandingString: expectedMap}
-		result := Expand(&testController, singleMultiLevel)
+		result := Expand(singleMultiLevel, "*", "")
 
 		So(result["si"], ShouldContain, 1)
 		So(result["si"], ShouldContain, 2)
@@ -74,8 +81,7 @@ func TestExpander(t *testing.T) {
 		singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
 		complexSingleLevel := ComplexSingleLevel{s: expectedMap["s"].(string), ssl: singleLevel}
 
-		testController := DummyController{ExpandingString: expectedMap}
-		result := Expand(&testController, complexSingleLevel)
+		result := Expand(complexSingleLevel, "*", "")
 		ssl := result["ssl"].(map[string]interface{})
 
 		So(result["s"], ShouldEqual, expectedMap["s"])
@@ -84,6 +90,23 @@ func TestExpander(t *testing.T) {
 		So(ssl["i"], ShouldEqual, simpleMap["i"])
 		So(ssl["f"], ShouldEqual, simpleMap["f"])
 		So(ssl["ui"], ShouldEqual, simpleMap["ui"])
+	})
+
+	Convey("It should return an empty expansion list when the expansion is *", t, func() {
+		expansion := "*"
+		result := buildModifyTree(expansion)
+
+		So(result, ShouldBeEmpty)
+	})
+
+	Convey("It should return a list of all fields when the expansion specifies them", t, func() {
+		expansion := "a, b"
+
+		result := buildModifyTree(expansion)
+
+		So(len(result), ShouldEqual, 2)
+		So(result[0].Value, ShouldEqual, "a")
+		So(result[1].Value, ShouldEqual, "b")
 	})
 
 }
@@ -104,21 +127,4 @@ type SimpleMultiLevel struct {
 type ComplexSingleLevel struct {
 	ssl SimpleSingleLevel
 	s   string
-}
-
-type DummyController struct {
-	Parametric
-	UsingExpandKey  bool
-	ExpandingString map[string]interface{}
-}
-
-func (c *DummyController) GetString(key string) string {
-	predefinedKeys := make(map[string]string)
-	predefinedKeys[key] = "*"
-
-	if key == "expand" {
-		c.UsingExpandKey = true
-	}
-
-	return predefinedKeys[key]
 }

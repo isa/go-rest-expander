@@ -3,23 +3,19 @@ package expander
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
-type Parametric interface {
-	GetString(key string) string
+type Modification struct {
+	Children []Modification
+	Value string
 }
 
-func Expand(p Parametric, object interface{}) map[string]interface{} {
-	if p == nil {
-		return make(map[string]interface{})
-	}
-
-	_ = p.GetString("expand")
-
-	return walker(object)
+func Expand(object interface{}, expansion, fields string) map[string]interface{} {
+	return typeWalker(object)
 }
 
-func walker(object interface{}) map[string]interface{} {
+func typeWalker(object interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if object == nil {
@@ -71,16 +67,38 @@ func getValueFrom(t reflect.Value) interface{} {
 
 		return result
 	case reflect.Struct:
-		return walker(t)
+		return typeWalker(t)
 	case reflect.Interface:
-		fmt.Println("interface...")
+		fmt.Println("interfaces are not supported...")
 	case reflect.Ptr:
-		fmt.Println("pointer...")
+		fmt.Println("pointers are not supported...")
 	case reflect.Array:
-		fmt.Println("array...")
+		fmt.Println("arrays are not supported...")
 	default:
-		fmt.Println("unsupported type...")
+		fmt.Println("ugh.. unsupported type...")
 	}
 
 	return ""
+}
+
+func buildModifyTree(expansion string) []Modification {
+	var result []Modification
+	const comma rune = ','
+
+	if expansion == "*" {
+		return result
+	}
+
+	expansion = strings.Replace(expansion, " ", "", -1)
+
+	lastCommaIndex := 0
+	for i, b := range expansion {
+		if b == comma {
+			result = append(result, Modification{Value: string(expansion[lastCommaIndex:i])})
+			lastCommaIndex = i + 1
+		}
+	}
+	result = append(result, Modification{Value: string(expansion[lastCommaIndex:])})
+
+	return result
 }
