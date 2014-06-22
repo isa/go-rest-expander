@@ -128,3 +128,7 @@ func main() {
 ## Developers
 
 I use [GoConvey](http://goconvey.co/) for testing.
+
+## License
+
+Licensed under [Apache 2.0](LICENSE).
