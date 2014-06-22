@@ -7,6 +7,12 @@ import (
 
 func TestExpander(t *testing.T) {
 
+	Convey("It should return empty key-values if the object is nil", t, func() {
+		result := Expand(nil, nil)
+
+		So(result, ShouldBeEmpty)
+	})
+
 	Convey("It should return all key-values that user defines", t, func() {
 		testController := new(DummyController)
 		_ = Expand(testController, nil)
@@ -34,15 +40,15 @@ func TestExpander(t *testing.T) {
 		So(result["ui"], ShouldEqual, expectedMap["ui"])
 	})
 
-	Convey("It should return a map of all the complex key-values that user defines if expand is *", t, func() {
+	Convey("It should return a map of all the simple with nested key-values that user defines if expand is *", t, func() {
 		expectedMap := make(map[string]interface{})
 		expectedMap["si"] = []int{1, 2}
 		expectedMap["msb"] = map[string]bool{"key1": true, "key2": false}
 
-		singleLevel := ComplexSingleLevel{expectedMap["si"].([]int), expectedMap["msb"].(map[string]bool)}
+		singleMultiLevel := SimpleMultiLevel{expectedMap["si"].([]int), expectedMap["msb"].(map[string]bool)}
 
 		testController := DummyController{ExpandingString: expectedMap}
-		result := Expand(&testController, singleLevel)
+		result := Expand(&testController, singleMultiLevel)
 
 		So(result["si"], ShouldContain, 1)
 		So(result["si"], ShouldContain, 2)
@@ -51,6 +57,33 @@ func TestExpander(t *testing.T) {
 		for k, v := range msb {
 			So(v, ShouldEqual, msb[k])
 		}
+	})
+
+	Convey("It should return a map of all the complex key-values that user defines if expand is *", t, func() {
+		simpleMap := make(map[string]interface{})
+		simpleMap["s"] = "bar"
+		simpleMap["b"] = false
+		simpleMap["i"] = -1
+		simpleMap["f"] = 1.1
+		simpleMap["ui"] = 1
+
+		expectedMap := make(map[string]interface{})
+		expectedMap["ssl"] = simpleMap
+		expectedMap["s"] = "a string"
+
+		singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+		complexSingleLevel := ComplexSingleLevel{s: expectedMap["s"].(string), ssl: singleLevel}
+
+		testController := DummyController{ExpandingString: expectedMap}
+		result := Expand(&testController, complexSingleLevel)
+		ssl := result["ssl"].(map[string]interface{})
+
+		So(result["s"], ShouldEqual, expectedMap["s"])
+		So(ssl["s"], ShouldEqual, simpleMap["s"])
+		So(ssl["b"], ShouldEqual, simpleMap["b"])
+		So(ssl["i"], ShouldEqual, simpleMap["i"])
+		So(ssl["f"], ShouldEqual, simpleMap["f"])
+		So(ssl["ui"], ShouldEqual, simpleMap["ui"])
 	})
 
 }
@@ -63,9 +96,14 @@ type SimpleSingleLevel struct {
 	ui uint
 }
 
-type ComplexSingleLevel struct {
+type SimpleMultiLevel struct {
 	si  []int
 	msb map[string]bool
+}
+
+type ComplexSingleLevel struct {
+	ssl SimpleSingleLevel
+	s   string
 }
 
 type DummyController struct {

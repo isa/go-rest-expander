@@ -10,7 +10,16 @@ type Parametric interface {
 }
 
 func Expand(p Parametric, object interface{}) map[string]interface{} {
+	if p == nil {
+		return make(map[string]interface{})
+	}
+
 	_ = p.GetString("expand")
+
+	return walker(object)
+}
+
+func walker(object interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if object == nil {
@@ -18,6 +27,10 @@ func Expand(p Parametric, object interface{}) map[string]interface{} {
 	}
 
 	v := reflect.ValueOf(object)
+	switch object.(type) {
+	case reflect.Value:
+		v = object.(reflect.Value)
+	}
 
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
@@ -57,6 +70,14 @@ func getValueFrom(t reflect.Value) interface{} {
 		}
 
 		return result
+	case reflect.Struct:
+		return walker(t)
+	case reflect.Interface:
+		fmt.Println("interface...")
+	case reflect.Ptr:
+		fmt.Println("pointer...")
+	case reflect.Array:
+		fmt.Println("array...")
 	default:
 		fmt.Println("unsupported type...")
 	}
