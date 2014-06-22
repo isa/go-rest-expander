@@ -13,11 +13,45 @@ type Modification struct {
 
 type Modifications []Modification
 
-func Expand(data interface{}, expansion, fields string) map[string]interface{} {
-	return typeWalker(data)
+func (m Modifications) Contains(v string) bool {
+	if m.IsEmpty() {
+		return true
+	}
+
+	for _, m := range m {
+		if v == m.Value {
+			return true
+		}
+	}
+
+	return false
 }
 
-func typeWalker(data interface{}) map[string]interface{} {
+func (m Modifications) IsEmpty() bool {
+	return len(m) == 0
+}
+
+func (m Modifications) Get(v string) Modification {
+	var result Modification
+
+	if m.IsEmpty() {
+		return result
+	}
+
+	for _, m := range m {
+		if v == m.Value {
+			return m
+		}
+	}
+
+	return result
+}
+
+func Expand(data interface{}, expansion, fields string) map[string]interface{} {
+	return typeWalker(data, nil)
+}
+
+func typeWalker(data interface{}, modifications Modifications) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -34,13 +68,15 @@ func typeWalker(data interface{}) map[string]interface{} {
 		f := v.Field(i)
 		ft := v.Type().Field(i)
 
-		result[ft.Name] = getValueFrom(f)
+		if modifications.Contains(ft.Name) {
+			result[ft.Name] = getValueFrom(f, modifications.Get(ft.Name).Children)
+		}
 	}
 
 	return result
 }
 
-func getValueFrom(t reflect.Value) interface{} {
+func getValueFrom(t reflect.Value, modifications Modifications) interface{} {
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return t.Int()
@@ -56,7 +92,7 @@ func getValueFrom(t reflect.Value) interface{} {
 		var result []interface{}
 
 		for i := 0; i < t.Len(); i++ {
-			result = append(result, getValueFrom(t.Index(i)))
+			result = append(result, getValueFrom(t.Index(i), modifications))
 		}
 
 		return result
@@ -64,12 +100,14 @@ func getValueFrom(t reflect.Value) interface{} {
 		result := make(map[interface{}]interface{})
 
 		for _, v := range t.MapKeys() {
-			result[v] = getValueFrom(t.MapIndex(v))
+			if modifications.Contains(v.String()) {
+				result[v] = getValueFrom(t.MapIndex(v), modifications)
+			}
 		}
 
 		return result
 	case reflect.Struct:
-		return typeWalker(t)
+		return typeWalker(t, modifications)
 	case reflect.Interface:
 		fmt.Println("interfaces are not supported...")
 	case reflect.Ptr:
@@ -83,7 +121,7 @@ func getValueFrom(t reflect.Value) interface{} {
 	return ""
 }
 
-func buildModifyTree(expansion string) ([]Modification, int) {
+func buildModificationTree(expansion string) ([]Modification, int) {
 	var result []Modification
 	const comma uint8 = ','
 	const openBracket uint8 = '('
@@ -101,7 +139,7 @@ func buildModifyTree(expansion string) ([]Modification, int) {
 		switch expansion[i] {
 			case openBracket:
 				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-				modification.Children, closeIndex = buildModifyTree(expansion[i + 1:])
+				modification.Children, closeIndex = buildModificationTree(expansion[i + 1:])
 				result = append(result, modification)
 				i = i + closeIndex
 				indexAfterSeparation = i + 1
@@ -130,7 +168,9 @@ func buildModifyTree(expansion string) ([]Modification, int) {
 }
 
 func filterOut(data interface{}, modifications Modifications) map[string]interface{} {
-	result := make(map[string]interface{})
+	if modifications == nil {
+		return make(map[string]interface{})
+	}
 
-	return result
+	return typeWalker(data, modifications)
 }
