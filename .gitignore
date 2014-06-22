@@ -1,8 +1,6 @@
 .DS_Store
 
-src/github.com
-!src/github.com/isa/go-rest-expander/*
-!src/github.com/isa/go-rest-expander/expander/*
+src
 pkg
 bin
 
