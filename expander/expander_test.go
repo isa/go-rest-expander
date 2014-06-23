@@ -421,6 +421,42 @@ func TestExpander(t *testing.T) {
 
 			getContentFrom = mockedFn
 		})
+
+		Convey("Fetching should replace an array of values with expanded data structures when valid URIs given", func() {
+			links := []Link{
+				Link{"http://valid1", "relation1", "GET"},
+				Link{"http://valid2", "relation2", "GET"},
+			}
+
+			info := []Info {
+				Info{"A name", 100},
+				Info{"Another name", 200},
+			}
+
+			mockedFn := getContentFrom
+			index := 0
+			getContentFrom = func(url *url.URL) string {
+				result, _ := json.Marshal(info[index])
+				index = index + 1
+				return string(result)
+			}
+
+			simpleWithLinks := SimpleWithLinks{"something", links}
+
+			result := Expand(simpleWithLinks, "*", "")
+			members := result["Members"].([]interface{})
+
+			So(result["Name"], ShouldEqual, simpleWithLinks.Name)
+
+			for i, v := range members {
+				member := v.(map[string]interface{})
+
+				So(member["Name"], ShouldEqual, info[i].Name)
+				So(member["Age"], ShouldEqual, info[i].Age)
+			}
+
+			getContentFrom = mockedFn
+		})
 	})
 }
 
@@ -433,6 +469,11 @@ type Link struct {
 type Info struct {
 	Name string
 	Age int
+}
+
+type SimpleWithLinks struct {
+	Name string
+	Members []Link
 }
 
 type SimpleSingleLevel struct {

@@ -178,7 +178,18 @@ func getValueFrom(t reflect.Value, modifications Modifications) interface{} {
 		var result []interface{}
 
 		for i := 0; i < t.Len(); i++ {
-			result = append(result, getValueFrom(t.Index(i), modifications))
+			current := t.Index(i)
+
+			if isReference(current) {
+				uri := getReferenceURI(current)
+				resource, ok := getResourceFrom(uri)
+
+				if ok {
+					result = append(result, resource)
+				}
+			} else {
+				result = append(result, getValueFrom(current, modifications))
+			}
 		}
 
 		return result
