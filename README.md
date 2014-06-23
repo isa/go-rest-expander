@@ -15,8 +15,8 @@ call returns
   "name": "John Doe",
   "cell": "+1 (123) 123-1233",
   "addresses": [
-    "http://<your-domain>/addresses/id/147",
-    "http://<your-domain>/addresses/id/412"
+    {"rel": "home", "ref": "http://<your-domain>/addresses/id/147", "verb": "GET"},
+    {"rel": "business", "ref": "http://<your-domain>/addresses/id/412", "verb": "GET"},
   ]
 }
 ```

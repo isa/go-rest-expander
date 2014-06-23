@@ -1,13 +1,15 @@
 package expander
 
 import (
+	"fmt"
+	"net/url"
+	"encoding/json"
+	"reflect"
 	. "github.com/smartystreets/goconvey/convey"
 	"testing"
-	"fmt"
 )
 
 func TestExpander(t *testing.T) {
-
 
 	Convey("It should walk the given object and identify it's type:", t, func() {
 		Convey("Walking the type should return empty key-values if the object is nil", func() {
@@ -276,6 +278,161 @@ func TestExpander(t *testing.T) {
 		})
 
 	})
+
+	Convey("It should filter out the fields based on the given modification tree during expansion:", t, func() {
+		Convey("Filtering should return the full map when no Modifications is given", func() {
+			singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+
+			result := Expand(singleLevel, "", "")
+
+			So(result["s"], ShouldEqual, singleLevel.s)
+		})
+
+		Convey("Filtering should return the filtered fields in simple object as map when first-level Modifications given", func() {
+			singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+
+			result := Expand(singleLevel, "", "s, i")
+
+			So(result["s"], ShouldEqual, singleLevel.s)
+			So(result["i"], ShouldEqual, singleLevel.i)
+			So(result["b"], ShouldBeEmpty)
+			So(result["f"], ShouldBeEmpty)
+			So(result["ui"], ShouldBeEmpty)
+		})
+
+		Convey("Filtering should return the filtered fields in complex object as map when multi-level Modifications given", func() {
+			simpleMap := make(map[string]interface{})
+			simpleMap["s"] = "bar"
+			simpleMap["b"] = false
+			simpleMap["i"] = -1
+			simpleMap["f"] = 1.1
+			simpleMap["ui"] = 1
+
+			expectedMap := make(map[string]interface{})
+			expectedMap["ssl"] = simpleMap
+			expectedMap["s"] = "a string"
+
+			singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+			complexSingleLevel := ComplexSingleLevel{s: expectedMap["s"].(string), ssl: singleLevel}
+
+			result := Expand(complexSingleLevel, "", "s,ssl(b, f, ui)")
+			ssl := result["ssl"].(map[string]interface{})
+
+			So(result["s"], ShouldEqual, complexSingleLevel.s)
+			So(len(ssl), ShouldEqual, 3)
+			for k, v := range ssl {
+				key := fmt.Sprintf("%v", k)
+				So(v, ShouldEqual, simpleMap[key])
+			}
+		})
+	})
+
+	Convey("It should identify if given field is a reference field:", t, func() {
+		Convey("Identifying should return false when field is not a struct", func() {
+			info := Info{"A name", 100}
+			v := reflect.ValueOf(info)
+
+			result := isReference(v.Field(0))
+
+			So(result, ShouldBeFalse)
+		})
+
+		Convey("Identifying should return false when field is not a hypermedia link", func() {
+			singleLevel := SimpleSingleLevel{s: "bar", b: false, i: -1, f: 1.1, ui: 1}
+			complexSingleLevel := ComplexSingleLevel{s: "something", ssl: singleLevel}
+
+			v := reflect.ValueOf(complexSingleLevel)
+
+			result := isReference(v.Field(0))
+
+			So(result, ShouldBeFalse)
+		})
+
+		Convey("Identifying should return true when field is a hypermedia link", func() {
+			singleLevel := SimpleSingleLevel{l: Link{ref: "http://valid", rel: "nothing", verb: "GET"}}
+
+			v := reflect.ValueOf(singleLevel.l)
+
+			result := isReference(v)
+
+			So(result, ShouldBeTrue)
+		})
+	})
+
+	Convey("It should find expansion URI if given field is a reference field:", t, func() {
+		Convey("Identifying should return empty string when no ref field", func() {
+			info := Info{"A name", 100}
+			v := reflect.ValueOf(info)
+
+			result := getReferenceURI(v)
+
+			So(result, ShouldBeEmpty)
+		})
+
+		Convey("Identifying should return full URI when field is a ref field", func() {
+			singleLevel := SimpleSingleLevel{l: Link{ref: "http://valid", rel: "nothing", verb: "GET"}}
+
+			v := reflect.ValueOf(singleLevel.l)
+
+			result := getReferenceURI(v)
+
+			So(result, ShouldEqual, singleLevel.l.ref)
+		})
+	})
+
+	Convey("It should fetch the underlying data from the URIs during expansion:", t, func() {
+		Convey("Fetching should return the same value when non-URI data structure given", func() {
+			singleLevel := SimpleSingleLevel{l: Link{ref: "non-URI", rel: "nothing", verb: "GET"}}
+
+			result := Expand(singleLevel, "*", "")
+			actual := result["l"].(map[string]interface{})
+
+			So(actual["ref"], ShouldEqual, singleLevel.l.ref)
+			So(actual["rel"], ShouldEqual, singleLevel.l.rel)
+			So(actual["verb"], ShouldEqual, singleLevel.l.verb)
+		})
+
+		Convey("Fetching should return the same value when non-URI data structure given", func() {
+			singleLevel := SimpleSingleLevel{l: Link{ref: "non-URI", rel: "nothing", verb: "GET"}}
+
+			result := Expand(singleLevel, "*", "")
+			actual := result["l"].(map[string]interface{})
+
+			So(actual["ref"], ShouldEqual, singleLevel.l.ref)
+			So(actual["rel"], ShouldEqual, singleLevel.l.rel)
+			So(actual["verb"], ShouldEqual, singleLevel.l.verb)
+		})
+
+		Convey("Fetching should replace the value with expanded data structure when valid URI given", func() {
+			singleLevel := SimpleSingleLevel{l: Link{ref: "http://valid", rel: "nothing", verb: "GET"}}
+			info := Info{"A name", 100}
+
+			mockedFn := getContentFrom
+			getContentFrom = func(url *url.URL) string {
+				result, _ := json.Marshal(info)
+				return string(result)
+			}
+
+			result := Expand(singleLevel, "*", "")
+			actual := result["l"].(map[string]interface{})
+
+			So(actual["Name"], ShouldEqual, info.Name)
+			So(actual["Age"], ShouldEqual, info.Age)
+
+			getContentFrom = mockedFn
+		})
+	})
+}
+
+type Link struct {
+	ref string
+	rel string
+	verb string
+}
+
+type Info struct {
+	Name string
+	Age int
 }
 
 type SimpleSingleLevel struct {
@@ -284,6 +441,7 @@ type SimpleSingleLevel struct {
 	i  int
 	f  float64
 	ui uint
+	l Link
 }
 
 type SimpleMultiLevel struct {

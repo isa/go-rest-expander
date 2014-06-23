@@ -4,6 +4,17 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"net/url"
+	"net/http"
+	"io/ioutil"
+	"os"
+	"encoding/json"
+)
+
+const (
+	REF_KEY = "ref"
+	REL_KEY = "rel"
+	VERB_KEY = "verb"
 )
 
 type Modification struct {
@@ -48,6 +59,10 @@ func (m Modifications) Get(v string) Modification {
 }
 
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
+	if fields != "" {
+		modifications, _ := buildModificationTree(fields)
+		return filterOut(data, modifications)
+	}
 	return typeWalker(data, nil)
 }
 
@@ -69,11 +84,82 @@ func typeWalker(data interface{}, modifications Modifications) map[string]interf
 		ft := v.Type().Field(i)
 
 		if modifications.Contains(ft.Name) {
-			result[ft.Name] = getValueFrom(f, modifications.Get(ft.Name).Children)
+			val := getValueFrom(f, modifications.Get(ft.Name).Children)
+			result[ft.Name] = val
+
+			if isReference(f) {
+				uri := getReferenceURI(f)
+				resource, ok := getResourceFrom(uri)
+				if ok {
+					result[ft.Name] = resource
+				}
+			}
 		}
 	}
 
 	return result
+}
+
+func getResourceFrom(u string) (map[string]interface{}, bool) {
+	ok := false
+	uri, err := url.ParseRequestURI(u)
+	var m map[string]interface{}
+
+	if err == nil {
+		content := getContentFrom(uri)
+
+		_ = json.Unmarshal([]byte(content), &m)
+		ok = true
+	}
+
+	return m, ok
+}
+
+func isReference(t reflect.Value) bool {
+	if t.Kind() == reflect.Struct {
+		for i := 0; i < t.NumField(); i++ {
+			ft := t.Type().Field(i)
+
+			if ft.Name == REF_KEY {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func getReferenceURI(t reflect.Value) string {
+	if t.Kind() == reflect.Struct {
+		for i := 0; i < t.NumField(); i++ {
+			ft := t.Type().Field(i)
+
+			if ft.Name == REF_KEY {
+				return t.Field(i).String()
+			}
+		}
+	}
+
+	return ""
+}
+
+var getContentFrom = func(url *url.URL) string {
+	response, err := http.Get(url.String())
+
+	if err != nil {
+		fmt.Println(err)
+		return ""
+	}
+
+	defer response.Body.Close()
+	contents, err := ioutil.ReadAll(response.Body)
+
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	return string(contents)
 }
 
 func getValueFrom(t reflect.Value, modifications Modifications) interface{} {
