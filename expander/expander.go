@@ -85,13 +85,18 @@ func typeWalker(data interface{}, modifications Modifications) map[string]interf
 
 		if modifications.Contains(ft.Name) {
 			val := getValueFrom(f, modifications.Get(ft.Name).Children)
-			result[ft.Name] = val
+
+			key := ft.Name
+			if ft.Tag.Get("json") != "" {
+				key = ft.Tag.Get("json")
+			}
+			result[key] = val
 
 			if isReference(f) {
 				uri := getReferenceURI(f)
 				resource, ok := getResourceFrom(uri)
 				if ok {
-					result[ft.Name] = resource
+					result[key] = resource
 				}
 			}
 		}
@@ -127,7 +132,7 @@ func isReference(t reflect.Value) bool {
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
-			if ft.Name == REF_KEY {
+			if ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY {
 				return true
 			}
 		}
@@ -161,7 +166,7 @@ func getReferenceURI(t reflect.Value) string {
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
-			if ft.Name == REF_KEY {
+			if ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY {
 				return t.Field(i).String()
 			}
 		}
