@@ -1,25 +1,25 @@
 package expander
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"os"
 	"reflect"
 	"strings"
-	"net/url"
-	"net/http"
-	"io/ioutil"
-	"os"
-	"encoding/json"
 )
 
 const (
-	REF_KEY = "ref"
-	REL_KEY = "rel"
+	REF_KEY  = "ref"
+	REL_KEY  = "rel"
 	VERB_KEY = "verb"
 )
 
 type Modification struct {
 	Children []Modification
-	Value string
+	Value    string
 }
 
 type Modifications []Modification
@@ -107,12 +107,19 @@ func getResourceFrom(u string) (map[string]interface{}, bool) {
 
 	if err == nil {
 		content := getContentFrom(uri)
-
 		_ = json.Unmarshal([]byte(content), &m)
 		ok = true
+
+		if hasReference(m) {
+			expandChildren(m)
+		}
 	}
 
 	return m, ok
+}
+
+func expandChildren(m map[string]interface{}) {
+	fmt.Println("expanding..")
 }
 
 func isReference(t reflect.Value) bool {
@@ -123,6 +130,26 @@ func isReference(t reflect.Value) bool {
 			if ft.Name == REF_KEY {
 				return true
 			}
+		}
+	}
+
+	return false
+}
+
+func hasReference(m map[string]interface{}) bool {
+	fmt.Println(m)
+	for _, v := range m {
+		ft := reflect.TypeOf(v)
+
+		if ft.Kind() == reflect.Map {
+			child := v.(map[string]interface{})
+			_, ok := child[REF_KEY]
+
+			if ok {
+				return true
+			}
+
+			return hasReference(child)
 		}
 	}
 
@@ -143,8 +170,8 @@ func getReferenceURI(t reflect.Value) string {
 	return ""
 }
 
-var getContentFrom = func(url *url.URL) string {
-	response, err := http.Get(url.String())
+var getContentFrom = func(uri *url.URL) string {
+	response, err := http.Get(uri.String())
 
 	if err != nil {
 		fmt.Println(err)
@@ -234,26 +261,26 @@ func buildModificationTree(expansion string) ([]Modification, int) {
 
 	for i := 0; i < len(expansion); i++ {
 		switch expansion[i] {
-			case openBracket:
-				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-				modification.Children, closeIndex = buildModificationTree(expansion[i + 1:])
+		case openBracket:
+			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+			modification.Children, closeIndex = buildModificationTree(expansion[i+1:])
+			result = append(result, modification)
+			i = i + closeIndex
+			indexAfterSeparation = i + 1
+			closeIndex = indexAfterSeparation
+		case comma:
+			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+			if modification.Value != "" {
 				result = append(result, modification)
-				i = i + closeIndex
-				indexAfterSeparation = i + 1
-				closeIndex = indexAfterSeparation
-			case comma:
-				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-				if modification.Value != "" {
-					result = append(result, modification)
-				}
-				indexAfterSeparation = i + 1
-			case closeBracket:
-				modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-				if modification.Value != "" {
-					result = append(result, modification)
-				}
+			}
+			indexAfterSeparation = i + 1
+		case closeBracket:
+			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
+			if modification.Value != "" {
+				result = append(result, modification)
+			}
 
-				return result, i + 1
+			return result, i + 1
 		}
 	}
 
