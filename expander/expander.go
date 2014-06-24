@@ -17,18 +17,14 @@ const (
 	VERB_KEY = "verb"
 )
 
-type Modification struct {
-	Children []Modification
+type Filter struct {
+	Children []Filter
 	Value    string
 }
 
-type Modifications []Modification
+type Filters []Filter
 
-func (m Modifications) Contains(v string) bool {
-	if m.IsEmpty() {
-		return true
-	}
-
+func (m Filters) Contains(v string) bool {
 	for _, m := range m {
 		if v == m.Value {
 			return true
@@ -38,12 +34,12 @@ func (m Modifications) Contains(v string) bool {
 	return false
 }
 
-func (m Modifications) IsEmpty() bool {
+func (m Filters) IsEmpty() bool {
 	return len(m) == 0
 }
 
-func (m Modifications) Get(v string) Modification {
-	var result Modification
+func (m Filters) Get(v string) Filter {
+	var result Filter
 
 	if m.IsEmpty() {
 		return result
@@ -59,14 +55,14 @@ func (m Modifications) Get(v string) Modification {
 }
 
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
-	if fields != "" {
-		modifications, _ := buildModificationTree(fields)
-		return filterOut(data, modifications)
-	}
-	return typeWalker(data, nil)
+	fieldFilter, _ := buildFilterTree(fields)
+	expansionFilter, _ := buildFilterTree(expansion)
+
+	expanded := walkByExpansion(data, expansionFilter)
+	return walkByFilter(expanded, fieldFilter)
 }
 
-func typeWalker(data interface{}, modifications Modifications) map[string]interface{} {
+func walkByExpansion(data interface{}, filters Filters) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -83,26 +79,108 @@ func typeWalker(data interface{}, modifications Modifications) map[string]interf
 		f := v.Field(i)
 		ft := v.Type().Field(i)
 
-		if modifications.Contains(ft.Name) {
-			val := getValueFrom(f, modifications.Get(ft.Name).Children)
+		val := getValue(f, filters.Get(ft.Name).Children)
 
-			key := ft.Name
-			if ft.Tag.Get("json") != "" {
-				key = ft.Tag.Get("json")
+		key := ft.Name
+		if ft.Tag.Get("json") != "" {
+			key = ft.Tag.Get("json")
+		}
+		result[key] = val
+
+		if isReference(f) {
+			uri := getReferenceURI(f)
+			resource, ok := getResourceFrom(uri)
+			if ok {
+				result[key] = resource
 			}
-			result[key] = val
+		}
+	}
 
-			if isReference(f) {
-				uri := getReferenceURI(f)
+	return result
+}
+
+func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	if data == nil {
+		return result
+	}
+
+	for k, v := range data {
+		if filters.IsEmpty() || filters.Contains(k) {
+			result[k] = v
+			ft := reflect.ValueOf(v)
+
+			if isReference(ft) {
+				uri := getReferenceURI(ft)
 				resource, ok := getResourceFrom(uri)
 				if ok {
-					result[key] = resource
+					result[k] = resource
+				}
+			} else {
+				switch ft.Type().Kind() {
+				case reflect.Map:
+					result[k] = walkByFilter(v.(map[string]interface{}), filters.Get(k).Children)
 				}
 			}
 		}
 	}
 
 	return result
+}
+
+func getValue(t reflect.Value, filters Filters) interface{} {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return t.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return t.Uint()
+	case reflect.Float32, reflect.Float64:
+		return t.Float()
+	case reflect.Bool:
+		return t.Bool()
+	case reflect.String:
+		return t.String()
+	case reflect.Slice:
+		var result []interface{}
+
+		for i := 0; i < t.Len(); i++ {
+			current := t.Index(i)
+
+			if isReference(current) {
+				uri := getReferenceURI(current)
+				resource, ok := getResourceFrom(uri)
+
+				if ok {
+					result = append(result, resource)
+				}
+			} else {
+				result = append(result, getValue(current, filters))
+			}
+		}
+
+		return result
+	case reflect.Map:
+		result := make(map[string]interface{})
+
+		for _, v := range t.MapKeys() {
+			result[v.Interface().(string)] = getValue(t.MapIndex(v), filters)
+		}
+
+		return result
+	case reflect.Struct:
+		return walkByExpansion(t, filters)
+	case reflect.Interface:
+		fmt.Println("interfaces are not supported...")
+	case reflect.Ptr:
+		fmt.Println("pointers are not supported...")
+	case reflect.Array:
+		fmt.Println("arrays are not supported...")
+	default:
+		fmt.Println("ugh.. unsupported type...")
+	}
+
+	return ""
 }
 
 func getResourceFrom(u string) (map[string]interface{}, bool) {
@@ -217,95 +295,39 @@ var getContentFrom = func(uri *url.URL) string {
 	return string(contents)
 }
 
-func getValueFrom(t reflect.Value, modifications Modifications) interface{} {
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return t.Int()
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return t.Uint()
-	case reflect.Float32, reflect.Float64:
-		return t.Float()
-	case reflect.Bool:
-		return t.Bool()
-	case reflect.String:
-		return t.String()
-	case reflect.Slice:
-		var result []interface{}
-
-		for i := 0; i < t.Len(); i++ {
-			current := t.Index(i)
-
-			if isReference(current) {
-				uri := getReferenceURI(current)
-				resource, ok := getResourceFrom(uri)
-
-				if ok {
-					result = append(result, resource)
-				}
-			} else {
-				result = append(result, getValueFrom(current, modifications))
-			}
-		}
-
-		return result
-	case reflect.Map:
-		result := make(map[interface{}]interface{})
-
-		for _, v := range t.MapKeys() {
-			if modifications.Contains(v.String()) {
-				result[v] = getValueFrom(t.MapIndex(v), modifications)
-			}
-		}
-
-		return result
-	case reflect.Struct:
-		return typeWalker(t, modifications)
-	case reflect.Interface:
-		fmt.Println("interfaces are not supported...")
-	case reflect.Ptr:
-		fmt.Println("pointers are not supported...")
-	case reflect.Array:
-		fmt.Println("arrays are not supported...")
-	default:
-		fmt.Println("ugh.. unsupported type...")
-	}
-
-	return ""
-}
-
-func buildModificationTree(expansion string) ([]Modification, int) {
-	var result []Modification
+func buildFilterTree(statement string) ([]Filter, int) {
+	var result []Filter
 	const comma uint8 = ','
 	const openBracket uint8 = '('
 	const closeBracket uint8 = ')'
 
-	if expansion == "*" {
+	if statement == "*" {
 		return result, -1
 	}
 
-	expansion = strings.Replace(expansion, " ", "", -1)
+	statement = strings.Replace(statement, " ", "", -1)
 	indexAfterSeparation := 0
 	closeIndex := 0
 
-	for i := 0; i < len(expansion); i++ {
-		switch expansion[i] {
+	for i := 0; i < len(statement); i++ {
+		switch statement[i] {
 		case openBracket:
-			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-			modification.Children, closeIndex = buildModificationTree(expansion[i+1:])
-			result = append(result, modification)
+			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
+			filter.Children, closeIndex = buildFilterTree(statement[i+1:])
+			result = append(result, filter)
 			i = i + closeIndex
 			indexAfterSeparation = i + 1
 			closeIndex = indexAfterSeparation
 		case comma:
-			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-			if modification.Value != "" {
-				result = append(result, modification)
+			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
+			if filter.Value != "" {
+				result = append(result, filter)
 			}
 			indexAfterSeparation = i + 1
 		case closeBracket:
-			modification := Modification{Value: string(expansion[indexAfterSeparation:i])}
-			if modification.Value != "" {
-				result = append(result, modification)
+			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
+			if filter.Value != "" {
+				result = append(result, filter)
 			}
 
 			return result, i + 1
@@ -313,16 +335,8 @@ func buildModificationTree(expansion string) ([]Modification, int) {
 	}
 
 	if indexAfterSeparation > closeIndex {
-		result = append(result, Modification{Value: string(expansion[indexAfterSeparation:])})
+		result = append(result, Filter{Value: string(statement[indexAfterSeparation:])})
 	}
 
 	return result, -1
-}
-
-func filterOut(data interface{}, modifications Modifications) map[string]interface{} {
-	if modifications == nil {
-		return make(map[string]interface{})
-	}
-
-	return typeWalker(data, modifications)
 }

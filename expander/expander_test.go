@@ -66,7 +66,7 @@ func TestExpander(t *testing.T) {
 			So(result["SI"], ShouldContain, 1)
 			So(result["SI"], ShouldContain, 2)
 
-			msb := result["MSB"].(map[interface{}]interface{})
+			msb := result["MSB"].(map[string]interface{})
 			for k, v := range msb {
 				key := fmt.Sprintf("%v", k)
 				So(v, ShouldEqual, expectedMsb[key])
@@ -103,7 +103,7 @@ func TestExpander(t *testing.T) {
 	Convey("It should create a modification tree:", t, func() {
 		Convey("Building a modification tree should be an empty expansion list when the expansion is *", func() {
 			expansion := "*"
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(result, ShouldBeEmpty)
 		})
@@ -111,7 +111,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all fields when the expansion specifies them", func() {
 			expansion := "A, B"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 2)
 			So(result[0].Value, ShouldEqual, "A")
@@ -121,7 +121,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all nested fields when the expansion specifies them", func() {
 			expansion := "A, B(C, D)"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 2)
 			So(result[0].Value, ShouldEqual, "A")
@@ -134,7 +134,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all nested fields and more when the expansion specifies them", func() {
 			expansion := "A, B(C, D), E"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 3)
 			So(result[0].Value, ShouldEqual, "A")
@@ -148,7 +148,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all deeply-nested fields when the expansion specifies them", func() {
 			expansion := "A, B(C(D, E), F), G"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 3)
 			So(result[0].Value, ShouldEqual, "A")
@@ -165,7 +165,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all confusingly deeply-nested fields when the expansion specifies them", func() {
 			expansion := "A(B(C(D))), E"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 2)
 			So(result[0].Value, ShouldEqual, "A")
@@ -181,7 +181,7 @@ func TestExpander(t *testing.T) {
 		Convey("Building a modification tree should be a list of all nested fields when the expansion specifies only nested ones", func() {
 			expansion := "A(B(C))"
 
-			result, _ := buildModificationTree(expansion)
+			result, _ := buildFilterTree(expansion)
 
 			So(len(result), ShouldEqual, 1)
 			So(result[0].Value, ShouldEqual, "A")
@@ -193,49 +193,41 @@ func TestExpander(t *testing.T) {
 	})
 
 	Convey("It should filter out the fields based on the given modification tree:", t, func() {
-		Convey("Filtering should return an empty map when no Modifications is given", func() {
-			result := filterOut("", nil)
-
-			So(result, ShouldBeEmpty)
-		})
-
 		Convey("Filtering should return an empty map when no Data is given", func() {
-			modifications := Modifications{}
-			result := filterOut(nil, modifications)
+			filters := Filters{}
+			result := walkByFilter(nil, filters)
 
 			So(result, ShouldBeEmpty)
 		})
 
 		Convey("Filtering should return a map with only selected fields on simple objects based on the modification tree", func() {
-			singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
-			modifications := Modifications{}
-			modifications = append(modifications, Modification{Value: "S"})
-			modifications = append(modifications, Modification{Value: "I"})
+			singleLevel := map[string]interface{}{"S": "bar", "B": false, "I": -1, "F": 1.1, "UI": 1}
+			filters := Filters{}
+			filters = append(filters, Filter{Value: "S"})
+			filters = append(filters, Filter{Value: "I"})
 
-			result := filterOut(singleLevel, modifications)
+			result := walkByFilter(singleLevel, filters)
 
-			So(result["S"], ShouldEqual, singleLevel.S)
-			So(result["I"], ShouldEqual, singleLevel.I)
+			So(result["S"], ShouldEqual, singleLevel["S"])
+			So(result["I"], ShouldEqual, singleLevel["I"])
 			So(result["B"], ShouldBeEmpty)
 			So(result["F"], ShouldBeEmpty)
 			So(result["UI"], ShouldBeEmpty)
 		})
 
 		Convey("Filtering should return a map with only selected fields on multilevel single objects based on the modification tree", func() {
-			expectedMsb := map[string]bool{"key1": true, "key2": false}
+			expectedMsb := map[string]interface{}{"key1": true, "key2": false}
 			expectedMap := make(map[string]interface{})
 			expectedMap["SI"] = []int{1, 2}
 			expectedMap["MSB"] = expectedMsb
 
-			singleMultiLevel := SimpleMultiLevel{expectedMap["SI"].([]int), expectedMap["MSB"].(map[string]bool)}
+			child := Filter{Value: "key1"}
+			parent := Filter{Value: "MSB", Children: []Filter{child}}
+			filters := Filters{}
+			filters = append(filters, parent)
 
-			child := Modification{Value: "key1"}
-			parent := Modification{Value: "MSB", Children: []Modification{child}}
-			modifications := Modifications{}
-			modifications = append(modifications, parent)
-
-			result := filterOut(singleMultiLevel, modifications)
-			msb := result["MSB"].(map[interface{}]interface{})
+			result := walkByFilter(expectedMap, filters)
+			msb := result["MSB"].(map[string]interface{})
 
 			So(len(msb), ShouldEqual, 1)
 			for k, v := range msb {
@@ -256,20 +248,17 @@ func TestExpander(t *testing.T) {
 			expectedMap["SSL"] = simpleMap
 			expectedMap["S"] = "a string"
 
-			singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
-			complexSingleLevel := ComplexSingleLevel{S: expectedMap["S"].(string), SSL: singleLevel}
+			child1 := Filter{Value: "B"}
+			child2 := Filter{Value: "F"}
+			parent := Filter{Value: "SSL", Children: Filters{child1, child2}}
+			filters := Filters{}
+			filters = append(filters, Filter{Value: "S"})
+			filters = append(filters, parent)
 
-			child1 := Modification{Value: "B"}
-			child2 := Modification{Value: "F"}
-			parent := Modification{Value: "SSL", Children: Modifications{child1, child2}}
-			modifications := Modifications{}
-			modifications = append(modifications, Modification{Value: "S"})
-			modifications = append(modifications, parent)
-
-			result := filterOut(complexSingleLevel, modifications)
+			result := walkByFilter(expectedMap, filters)
 			ssl := result["SSL"].(map[string]interface{})
 
-			So(result["S"], ShouldEqual, complexSingleLevel.S)
+			So(result["S"], ShouldEqual, expectedMap["S"])
 			So(len(ssl), ShouldEqual, 2)
 			for k, v := range ssl {
 				key := fmt.Sprintf("%v", k)
@@ -280,7 +269,7 @@ func TestExpander(t *testing.T) {
 	})
 
 	Convey("It should filter out the fields based on the given modification tree during expansion:", t, func() {
-		Convey("Filtering should return the full map when no Modifications is given", func() {
+		Convey("Filtering should return the full map when no Filters is given", func() {
 			singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
 
 			result := Expand(singleLevel, "", "")
@@ -288,7 +277,7 @@ func TestExpander(t *testing.T) {
 			So(result["S"], ShouldEqual, singleLevel.S)
 		})
 
-		Convey("Filtering should return the filtered fields in simple object as map when first-level Modifications given", func() {
+		Convey("Filtering should return the filtered fields in simple object as map when first-level Filters given", func() {
 			singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
 
 			result := Expand(singleLevel, "", "S, I")
@@ -300,7 +289,7 @@ func TestExpander(t *testing.T) {
 			So(result["UI"], ShouldBeEmpty)
 		})
 
-		Convey("Filtering should return the filtered fields in complex object as map when multi-level Modifications given", func() {
+		Convey("Filtering should return the filtered fields in complex object as map when multi-level Filters given", func() {
 			simpleMap := make(map[string]interface{})
 			simpleMap["S"] = "bar"
 			simpleMap["B"] = false
