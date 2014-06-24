@@ -116,15 +116,38 @@ func getResourceFrom(u string) (map[string]interface{}, bool) {
 		ok = true
 
 		if hasReference(m) {
-			expandChildren(m)
+			m = expandChildren(m)
 		}
 	}
 
 	return m, ok
 }
 
-func expandChildren(m map[string]interface{}) {
-	fmt.Println("expanding..")
+func expandChildren(m map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for key, v := range m {
+		ft := reflect.TypeOf(v)
+		result[key] = v
+
+		if ft.Kind() == reflect.Map {
+			child := v.(map[string]interface{})
+			uri, found := child[REF_KEY]
+
+			if found {
+				resource, ok := getResourceFrom(uri.(string))
+				if ok {
+					result[key] = resource
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+func isRefKey(ft reflect.StructField) bool {
+	return ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY
 }
 
 func isReference(t reflect.Value) bool {
@@ -132,7 +155,7 @@ func isReference(t reflect.Value) bool {
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
-			if ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY {
+			if isRefKey(ft) {
 				return true
 			}
 		}
@@ -142,10 +165,10 @@ func isReference(t reflect.Value) bool {
 }
 
 func hasReference(m map[string]interface{}) bool {
-	fmt.Println(m)
 	for _, v := range m {
 		ft := reflect.TypeOf(v)
 
+		// what about lists?
 		if ft.Kind() == reflect.Map {
 			child := v.(map[string]interface{})
 			_, ok := child[REF_KEY]
@@ -166,7 +189,7 @@ func getReferenceURI(t reflect.Value) string {
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
-			if ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY {
+			if isRefKey(ft) {
 				return t.Field(i).String()
 			}
 		}

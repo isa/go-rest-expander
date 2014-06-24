@@ -518,7 +518,6 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Fetching should replace the value recursively with expanded data structure when valid URIs given", func() {
-			fmt.Println("-------------------------")
 			singleLevel1 := SimpleSingleLevel{S: "one", L: Link{Ref: "http://valid1/ssl", Rel: "nothing1", Verb: "GET"}}
 			singleLevel2 := SimpleSingleLevel{S: "two", L: Link{Ref: "http://valid2/info", Rel: "nothing2", Verb: "GET"}}
 			info := Info{"A name", 100}
