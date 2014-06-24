@@ -18,7 +18,7 @@ const (
 )
 
 type Filter struct {
-	Children []Filter
+	Children Filters
 	Value    string
 }
 
@@ -55,14 +55,41 @@ func (m Filters) Get(v string) Filter {
 }
 
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
+	var recursiveExpansion bool
+
 	fieldFilter, _ := buildFilterTree(fields)
 	expansionFilter, _ := buildFilterTree(expansion)
 
-	expanded := walkByExpansion(data, expansionFilter)
+	if expansion == "*" {
+		recursiveExpansion = true
+	}
+
+	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
 	return walkByFilter(expanded, fieldFilter)
 }
 
-func walkByExpansion(data interface{}, filters Filters) map[string]interface{} {
+func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	if data == nil {
+		return result
+	}
+
+	for k, v := range data {
+		if filters.IsEmpty() || filters.Contains(k) {
+			result[k] = v
+			ft := reflect.ValueOf(v)
+
+			if ft.Type().Kind() == reflect.Map {
+				result[k] = walkByFilter(v.(map[string]interface{}), filters.Get(k).Children)
+			}
+		}
+	}
+
+	return result
+}
+
+func walkByExpansion(data interface{}, filters Filters, recursive bool) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -79,48 +106,26 @@ func walkByExpansion(data interface{}, filters Filters) map[string]interface{} {
 		f := v.Field(i)
 		ft := v.Type().Field(i)
 
-		val := getValue(f, filters.Get(ft.Name).Children)
-
 		key := ft.Name
 		if ft.Tag.Get("json") != "" {
 			key = ft.Tag.Get("json")
 		}
+
+		options := func() (bool, string) {
+			return recursive, key
+		}
+
+		val := getValue(f, filters, options)
 		result[key] = val
 
 		if isReference(f) {
-			uri := getReferenceURI(f)
-			resource, ok := getResourceFrom(uri)
-			if ok {
-				result[key] = resource
-			}
-		}
-	}
+			if filters.Contains(key) || recursive {
+				uri := getReferenceURI(f)
 
-	return result
-}
+				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 
-func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
-	result := make(map[string]interface{})
-
-	if data == nil {
-		return result
-	}
-
-	for k, v := range data {
-		if filters.IsEmpty() || filters.Contains(k) {
-			result[k] = v
-			ft := reflect.ValueOf(v)
-
-			if isReference(ft) {
-				uri := getReferenceURI(ft)
-				resource, ok := getResourceFrom(uri)
 				if ok {
-					result[k] = resource
-				}
-			} else {
-				switch ft.Type().Kind() {
-				case reflect.Map:
-					result[k] = walkByFilter(v.(map[string]interface{}), filters.Get(k).Children)
+					result[key] = resource
 				}
 			}
 		}
@@ -129,7 +134,9 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	return result
 }
 
-func getValue(t reflect.Value, filters Filters) interface{} {
+func getValue(t reflect.Value, filters Filters, options func() (bool, string)) interface{} {
+	recursive, parentKey := options()
+
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return t.Int()
@@ -147,15 +154,15 @@ func getValue(t reflect.Value, filters Filters) interface{} {
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
 
-			if isReference(current) {
+			if isReference(current) && (filters.Contains(parentKey) || recursive) {
 				uri := getReferenceURI(current)
-				resource, ok := getResourceFrom(uri)
+				resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
 				if ok {
 					result = append(result, resource)
 				}
 			} else {
-				result = append(result, getValue(current, filters))
+				result = append(result, getValue(current, filters, options))
 			}
 		}
 
@@ -164,26 +171,21 @@ func getValue(t reflect.Value, filters Filters) interface{} {
 		result := make(map[string]interface{})
 
 		for _, v := range t.MapKeys() {
-			result[v.Interface().(string)] = getValue(t.MapIndex(v), filters)
+			key := v.Interface().(string)
+			result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
 		}
 
 		return result
 	case reflect.Struct:
-		return walkByExpansion(t, filters)
-	case reflect.Interface:
-		fmt.Println("interfaces are not supported...")
-	case reflect.Ptr:
-		fmt.Println("pointers are not supported...")
-	case reflect.Array:
-		fmt.Println("arrays are not supported...")
+		return walkByExpansion(t, filters, recursive)
 	default:
-		fmt.Println("ugh.. unsupported type...")
+		fmt.Println("Ugh.. Unsupported type!")
 	}
 
 	return ""
 }
 
-func getResourceFrom(u string) (map[string]interface{}, bool) {
+func getResourceFrom(u string, filters Filters, recursive bool) (map[string]interface{}, bool) {
 	ok := false
 	uri, err := url.ParseRequestURI(u)
 	var m map[string]interface{}
@@ -194,26 +196,26 @@ func getResourceFrom(u string) (map[string]interface{}, bool) {
 		ok = true
 
 		if hasReference(m) {
-			m = expandChildren(m)
+			m = expandChildren(m, filters, recursive)
 		}
 	}
 
 	return m, ok
 }
 
-func expandChildren(m map[string]interface{}) map[string]interface{} {
+func expandChildren(m map[string]interface{}, filters Filters, recursive bool) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	for key, v := range m {
 		ft := reflect.TypeOf(v)
 		result[key] = v
 
-		if ft.Kind() == reflect.Map {
+		if ft.Kind() == reflect.Map && (recursive || filters.Contains(key)) {
 			child := v.(map[string]interface{})
 			uri, found := child[REF_KEY]
 
 			if found {
-				resource, ok := getResourceFrom(uri.(string))
+				resource, ok := getResourceFrom(uri.(string), filters.Get(key).Children, recursive)
 				if ok {
 					result[key] = resource
 				}
@@ -306,6 +308,11 @@ func buildFilterTree(statement string) ([]Filter, int) {
 	}
 
 	statement = strings.Replace(statement, " ", "", -1)
+
+	if len(statement) == 0 {
+		return result, -1
+	}
+
 	indexAfterSeparation := 0
 	closeIndex := 0
 
@@ -336,6 +343,10 @@ func buildFilterTree(statement string) ([]Filter, int) {
 
 	if indexAfterSeparation > closeIndex {
 		result = append(result, Filter{Value: string(statement[indexAfterSeparation:])})
+	}
+
+	if indexAfterSeparation == 0 {
+		result = append(result, Filter{Value: statement})
 	}
 
 	return result, -1

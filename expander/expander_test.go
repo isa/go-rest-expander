@@ -108,6 +108,22 @@ func TestExpander(t *testing.T) {
 			So(result, ShouldBeEmpty)
 		})
 
+		Convey("Building a modification tree should be an empty expansion list when the expansion is not specified", func() {
+			expansion := ""
+			result, _ := buildFilterTree(expansion)
+
+			So(result, ShouldBeEmpty)
+		})
+
+		Convey("Building a modification tree should be a list of single field when the expansion specifies only one", func() {
+			expansion := "A"
+
+			result, _ := buildFilterTree(expansion)
+
+			So(len(result), ShouldEqual, 1)
+			So(result[0].Value, ShouldEqual, "A")
+		})
+
 		Convey("Building a modification tree should be a list of all fields when the expansion specifies them", func() {
 			expansion := "A, B"
 
@@ -532,6 +548,78 @@ func TestExpander(t *testing.T) {
 			So(parent["S"], ShouldEqual, singleLevel2.S)
 			So(child["Name"], ShouldEqual, info.Name)
 			So(child["Age"], ShouldEqual, info.Age)
+
+			getContentFrom = mockedFn
+		})
+
+		Convey("Expanding should replace the value recursively and filter the expanded data structure when valid URIs given", func() {
+			singleLevel1 := SimpleSingleLevel{S: "one", L: Link{Ref: "http://valid1/ssl", Rel: "nothing1", Verb: "GET"}}
+			singleLevel2 := SimpleSingleLevel{S: "two", L: Link{Ref: "http://valid2/info", Rel: "nothing2", Verb: "GET"}}
+			info := Info{"A name", 100}
+
+			mockedFn := getContentFrom
+			index := 0
+			getContentFrom = func(url *url.URL) string {
+				var result []byte
+				if (index > 0) {
+					result, _ = json.Marshal(info)
+					return string(result)
+				}
+				result, _ = json.Marshal(singleLevel2)
+				index = index + 1
+				return string(result)
+			}
+
+			result := Expand(singleLevel1, "L", "")
+			parent := result["L"].(map[string]interface{})
+			child := parent["L"].(map[string]interface{})
+
+			So(result["S"], ShouldEqual, singleLevel1.S)
+			So(parent["S"], ShouldEqual, singleLevel2.S)
+			So(child["ref"], ShouldEqual, singleLevel2.L.Ref)
+			So(child["rel"], ShouldEqual, singleLevel2.L.Rel)
+			So(child["verb"], ShouldEqual, singleLevel2.L.Verb)
+
+			getContentFrom = mockedFn
+		})
+
+		Convey("Expanding should replace the value recursively and filter the expanded data structure when data contains a list of nested sub-types", func() {
+			link1 := Link{Ref: "http://valid1/ssl", Rel: "nothing1", Verb: "GET"}
+			link2 := Link{Ref: "http://valid2/ssl", Rel: "nothing2", Verb: "GET"}
+			singleLevel := SimpleSingleLevel{S: "one", L: link1}
+			info := Info{"A name", 100}
+			simpleWithLinks := SimpleWithLinks{
+				Name: "lorem",
+				Members: []Link{link1, link2},
+			}
+
+			mockedFn := getContentFrom
+			index := 0
+			getContentFrom = func(url *url.URL) string {
+				var result []byte
+				if (index > 1) {
+					result, _ = json.Marshal(info)
+					return string(result)
+				}
+				result, _ = json.Marshal(singleLevel)
+				index = index + 1
+				return string(result)
+			}
+
+			result := Expand(simpleWithLinks, "Members(L)", "Name,Members(Name)")
+			parent := result["Members"].([]interface{})
+
+			So(len(parent), ShouldEqual, 2)
+
+			child1 := parent[0].(map[string]interface{})
+			So(child1["S"], ShouldEqual, singleLevel.S)
+
+			actualLink := child1["L"].(map[string]interface{})
+			So(actualLink["S"], ShouldEqual, singleLevel.S)
+
+			child2 := parent[1].(map[string]interface{})
+			So(child2["Name"], ShouldEqual, info.Name)
+			So(child2["Age"], ShouldEqual, info.Age)
 
 			getContentFrom = mockedFn
 		})
