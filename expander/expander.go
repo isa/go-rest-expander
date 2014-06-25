@@ -257,8 +257,6 @@ func isRefKey(ft reflect.StructField) bool {
 
 func isReference(t reflect.Value) bool {
 	if t.Kind() == reflect.Struct {
-	// switch t.Kind() {
-	// case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
@@ -266,13 +264,6 @@ func isReference(t reflect.Value) bool {
 				return true
 			}
 		}
-	// case reflect.Slice:
-	// 	child := t.Index(0)
-	// 	for i := 0; i < child.NumField(); i++ {
-	// 		if isRefKey(child.Type().Field(i)) {
-	// 			return true
-	// 		}
-	// 	}
 	}
 
 	return false
@@ -282,7 +273,6 @@ func hasReference(m map[string]interface{}) bool {
 	for _, v := range m {
 		ft := reflect.TypeOf(v)
 
-		// what about lists?
 		if ft.Kind() == reflect.Map {
 			child := v.(map[string]interface{})
 			_, ok := child[REF_KEY]
