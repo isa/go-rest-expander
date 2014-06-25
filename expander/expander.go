@@ -69,6 +69,7 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 }
 
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
+	//TODO: TagFields
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -80,8 +81,18 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 			result[k] = v
 			ft := reflect.ValueOf(v)
 
-			if ft.Type().Kind() == reflect.Map {
+			switch ft.Type().Kind() {
+			case reflect.Map:
 				result[k] = walkByFilter(v.(map[string]interface{}), filters.Get(k).Children)
+			case reflect.Slice:
+				if ft.Index(0).Kind() == reflect.Map {
+					children := make([]map[string]interface{}, 0)
+					for _, child := range v.([]map[string]interface{}) {
+						item := walkByFilter(child, filters.Get(k).Children)
+						children = append(children, item)
+					}
+					result[k] = children
+				}
 			}
 		}
 	}
@@ -196,7 +207,7 @@ func getResourceFrom(u string, filters Filters, recursive bool) (map[string]inte
 		ok = true
 
 		if hasReference(m) {
-			m = expandChildren(m, filters, recursive)
+			return expandChildren(m, filters, recursive), ok
 		}
 	}
 
@@ -216,6 +227,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 
 			if found {
 				resource, ok := getResourceFrom(uri.(string), filters.Get(key).Children, recursive)
+
 				if ok {
 					result[key] = resource
 				}

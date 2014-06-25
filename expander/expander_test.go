@@ -252,6 +252,35 @@ func TestExpander(t *testing.T) {
 			}
 		})
 
+		Convey("Filtering should return a map with only selected fields on simple-multilevel objects based on the modification tree", func() {
+			expectedMap := make(map[string]interface{})
+			expectedMap["S"] = "a string"
+			expectedChildren := make([]map[string]interface{}, 0)
+			expectedChildren = append(expectedChildren, map[string]interface{} {
+				"key1": "value1",
+				"key2": 0,
+			})
+			expectedChildren = append(expectedChildren, map[string]interface{} {
+				"key1": "value2",
+				"key2": 1,
+			})
+			expectedMap["Children"] = expectedChildren
+
+			parent := Filter{Value: "Children", Children: Filters{Filter{Value: "key2"}}}
+			filters := Filters{}
+			filters = append(filters, Filter{Value: "S"})
+			filters = append(filters, parent)
+
+			result := walkByFilter(expectedMap, filters)
+			children := result["Children"].([]map[string]interface{})
+
+			So(result["S"], ShouldEqual, expectedMap["S"])
+			for i, v := range children {
+				So(v["key1"], ShouldBeEmpty)
+				So(v["key2"], ShouldEqual, i)
+			}
+		})
+
 		Convey("Filtering should return a map with only selected fields on complex objects based on the modification tree", func() {
 			simpleMap := make(map[string]interface{})
 			simpleMap["S"] = "bar"
