@@ -584,18 +584,11 @@ func TestExpander(t *testing.T) {
 		Convey("Expanding should replace the value recursively and filter the expanded data structure when valid URIs given", func() {
 			singleLevel1 := SimpleSingleLevel{S: "one", L: Link{Ref: "http://valid1/ssl", Rel: "nothing1", Verb: "GET"}}
 			singleLevel2 := SimpleSingleLevel{S: "two", L: Link{Ref: "http://valid2/info", Rel: "nothing2", Verb: "GET"}}
-			info := Info{"A name", 100}
 
 			mockedFn := getContentFrom
-			index := 0
 			getContentFrom = func(url *url.URL) string {
 				var result []byte
-				if (index > 0) {
-					result, _ = json.Marshal(info)
-					return string(result)
-				}
 				result, _ = json.Marshal(singleLevel2)
-				index = index + 1
 				return string(result)
 			}
 
@@ -626,29 +619,25 @@ func TestExpander(t *testing.T) {
 			index := 0
 			getContentFrom = func(url *url.URL) string {
 				var result []byte
-				if (index > 1) {
+				index = index + 1
+				if (index % 2 == 0) {
 					result, _ = json.Marshal(info)
 					return string(result)
 				}
 				result, _ = json.Marshal(singleLevel)
-				index = index + 1
 				return string(result)
 			}
 
-			result := Expand(simpleWithLinks, "Members(L)", "Name,Members(Name)")
+			result := Expand(simpleWithLinks, "Members(L)", "Name,Members(S,L)")
 			parent := result["Members"].([]interface{})
 
-			So(len(parent), ShouldEqual, 2)
+			So(len(result), ShouldEqual, 2)
 
 			child1 := parent[0].(map[string]interface{})
 			So(child1["S"], ShouldEqual, singleLevel.S)
 
 			actualLink := child1["L"].(map[string]interface{})
-			So(actualLink["S"], ShouldEqual, singleLevel.S)
-
-			child2 := parent[1].(map[string]interface{})
-			So(child2["Name"], ShouldEqual, info.Name)
-			So(child2["Age"], ShouldEqual, info.Age)
+			So(actualLink["Name"], ShouldEqual, info.Name)
 
 			getContentFrom = mockedFn
 		})

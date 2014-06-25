@@ -79,17 +79,32 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	for k, v := range data {
 		if filters.IsEmpty() || filters.Contains(k) {
 			result[k] = v
+			subFilters := filters.Get(k).Children
 			ft := reflect.ValueOf(v)
 
 			switch ft.Type().Kind() {
 			case reflect.Map:
-				result[k] = walkByFilter(v.(map[string]interface{}), filters.Get(k).Children)
+				result[k] = walkByFilter(v.(map[string]interface{}), subFilters)
 			case reflect.Slice:
-				if ft.Index(0).Kind() == reflect.Map {
+				switch ft.Index(0).Kind() {
+				case reflect.Map:
 					children := make([]map[string]interface{}, 0)
 					for _, child := range v.([]map[string]interface{}) {
-						item := walkByFilter(child, filters.Get(k).Children)
+						item := walkByFilter(child, subFilters)
 						children = append(children, item)
+					}
+					result[k] = children
+				default:
+					children := make([]interface{}, 0)
+					for _, child := range v.([]interface{}) {
+						cft := reflect.TypeOf(child)
+
+						if cft.Kind() == reflect.Map {
+							item := walkByFilter(child.(map[string]interface{}), subFilters)
+							children = append(children, item)
+						} else {
+							children = append(children, child)
+						}
 					}
 					result[k] = children
 				}
@@ -132,7 +147,6 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		if isReference(f) {
 			if filters.Contains(key) || recursive {
 				uri := getReferenceURI(f)
-
 				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 
 				if ok {
@@ -164,7 +178,6 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
-
 			if isReference(current) && (filters.Contains(parentKey) || recursive) {
 				uri := getReferenceURI(current)
 				resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
@@ -226,7 +239,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 			uri, found := child[REF_KEY]
 
 			if found {
-				resource, ok := getResourceFrom(uri.(string), filters.Get(key).Children, recursive)
+				resource, ok := getResourceFrom(uri.(string), filters, recursive)
 
 				if ok {
 					result[key] = resource
@@ -244,6 +257,8 @@ func isRefKey(ft reflect.StructField) bool {
 
 func isReference(t reflect.Value) bool {
 	if t.Kind() == reflect.Struct {
+	// switch t.Kind() {
+	// case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
@@ -251,6 +266,13 @@ func isReference(t reflect.Value) bool {
 				return true
 			}
 		}
+	// case reflect.Slice:
+	// 	child := t.Index(0)
+	// 	for i := 0; i < child.NumField(); i++ {
+	// 		if isRefKey(child.Type().Field(i)) {
+	// 			return true
+	// 		}
+	// 	}
 	}
 
 	return false
