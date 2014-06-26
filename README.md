@@ -159,7 +159,13 @@ go get github.com/isa/go-rest-expander/expander
 
 ## Usage
 
-You can always check the `example.go` file in the root directory for a running example. Just run the example by:
+Basically all you need to do is calling the Expand function with the right filters and expansion parameter.
+
+```go
+expanded := expander.Expand(myData, expansion, filter)
+```
+
+That's it. You can always check the `example.go` file in the root directory for a running example. Just run the example by:
 
 ```bash
 go run example.go
