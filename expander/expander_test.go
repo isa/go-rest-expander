@@ -473,6 +473,104 @@ func TestExpander(t *testing.T) {
 		})
 	})
 
+	Convey("It should fetch the underlying data from the Mongo during expansion:", t, func() {
+		Convey("Fetching should return the same value when Mongo flag is not set", func() {
+			simple := SimpleWithDBRef{Name: "foo", Ref: DBRef{"a collection", "an id", "a database"}}
+
+			result := Expand(simple, "*", "")
+			mongoRef := result["Ref"].(map[string]interface{})
+
+			So(result["Name"], ShouldEqual, simple.Name)
+			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
+			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
+			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
+		})
+
+		Convey("Fetching should return the same value when Mongo flag is set to false", func() {
+			simple := SimpleWithDBRef{Name: "foo", Ref: DBRef{"a collection", "an id", "a database"}}
+
+			ExpanderConfig = Configuration{UsingMongo: false}
+			result := Expand(simple, "*", "")
+			mongoRef := result["Ref"].(map[string]interface{})
+
+			So(result["Name"], ShouldEqual, simple.Name)
+			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
+			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
+			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
+		})
+
+		Convey("Fetching should return the same value when Mongo flag is set to true without IdURIs", func() {
+			simple := SimpleWithDBRef{Name: "foo", Ref: DBRef{"a collection", MongoId("123"), "a database"}}
+
+			ExpanderConfig = Configuration{UsingMongo: true}
+			result := Expand(simple, "*", "")
+			mongoRef := result["Ref"].(map[string]interface{})
+
+			So(result["Name"], ShouldEqual, simple.Name)
+			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
+			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
+			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
+		})
+
+		Convey("Fetching should return the underlying value when Mongo flag is set to true with proper IdURIs", func() {
+			simple := SimpleWithDBRef{Name: "foo", Ref: DBRef{"a collection", MongoId("123"), "a database"}}
+			info := Info{"A name", 100}
+			uris := map[string]string{simple.Ref.Collection: "http://some-uri/id"}
+
+			ExpanderConfig = Configuration{UsingMongo: true, IdURIs: uris}
+			mockedFn := getContentFrom
+			getContentFrom = func(url *url.URL) string {
+				result, _ := json.Marshal(info)
+				return string(result)
+			}
+
+			result := Expand(simple, "*", "")
+			mongoRef := result["Ref"].(map[string]interface{})
+
+			So(result["Name"], ShouldEqual, simple.Name)
+			So(mongoRef["Name"], ShouldEqual, info.Name)
+			So(mongoRef["Age"], ShouldEqual, info.Age)
+
+			getContentFrom = mockedFn
+		})
+
+		Convey("Fetching should return a list of underlying values when Mongo flag is set to true with proper IdURIs", func() {
+			simple := SimpleWithMultipleDBRefs {
+				Name: "foo",
+				Refs: []DBRef{
+					{"a collection", MongoId("123"), "a database"},
+					{"another collection", MongoId("234"), "another database"},
+				},
+			}
+			info := Info{"A name", 100}
+			uris := map[string]string {
+				"a collection": "http://some-uri/id",
+				"another collection": "http://some-other-uri/id",
+			}
+
+			ExpanderConfig = Configuration{UsingMongo: true, IdURIs: uris}
+			mockedFn := getContentFrom
+			getContentFrom = func(url *url.URL) string {
+				result, _ := json.Marshal(info)
+				return string(result)
+			}
+
+			result := Expand(simple, "*", "")
+			mongoRef := result["Refs"].([]interface{})
+			child1 := mongoRef[0].(map[string]interface{})
+			child2 := mongoRef[1].(map[string]interface{})
+
+			So(result["Name"], ShouldEqual, simple.Name)
+			So(child1["Name"], ShouldEqual, info.Name)
+			So(child1["Age"], ShouldEqual, info.Age)
+			So(child2["Name"], ShouldEqual, info.Name)
+			So(child2["Age"], ShouldEqual, info.Age)
+
+			getContentFrom = mockedFn
+		})
+
+	})
+
 	Convey("It should fetch the underlying data from the URIs during expansion:", t, func() {
 		Convey("Fetching should return the same value when non-URI data structure given", func() {
 			singleLevel := SimpleSingleLevel{L: Link{Ref: "non-URI", Rel: "nothing", Verb: "GET"}}
@@ -651,6 +749,12 @@ type Link struct {
 	Verb string `json:"verb"`
 }
 
+type MongoId string
+
+func (m MongoId) Hex() string {
+	return string(m)
+}
+
 type Info struct {
 	Name string
 	Age int
@@ -659,6 +763,16 @@ type Info struct {
 type SimpleWithLinks struct {
 	Name string
 	Members []Link
+}
+
+type SimpleWithDBRef struct {
+	Name string
+	Ref DBRef
+}
+
+type SimpleWithMultipleDBRefs struct {
+	Name string
+	Refs []DBRef
 }
 
 type SimpleSingleLevel struct {

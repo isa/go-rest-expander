@@ -15,7 +15,25 @@ const (
 	REF_KEY  = "ref"
 	REL_KEY  = "rel"
 	VERB_KEY = "verb"
+	COLLECTION_KEY = "Collection"
 )
+
+type Configuration struct {
+	UsingMongo bool
+	IdURIs map[string]string
+}
+
+var ExpanderConfig Configuration = Configuration{UsingMongo:false}
+
+type DBRef struct {
+	Collection string
+	Id interface{}
+	Database string
+}
+
+type ObjectId interface {
+	Hex() string
+}
 
 type Filter struct {
 	Children Filters
@@ -54,9 +72,13 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
+//TODO: TagFields & BSONFields
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
-	var recursiveExpansion bool
+	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
+		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
+	}
 
+	var recursiveExpansion bool
 	fieldFilter, _ := buildFilterTree(fields)
 	expansionFilter, _ := buildFilterTree(expansion)
 
@@ -69,7 +91,6 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 }
 
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
-	//TODO: TagFields
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -141,19 +162,29 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 			return recursive, key
 		}
 
-		val := getValue(f, filters, options)
-		result[key] = val
+		if isMongoDBRef(f) {
+			uri := buildReferenceURI(f)
+			resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 
-		if isReference(f) {
-			if filters.Contains(key) || recursive {
-				uri := getReferenceURI(f)
-				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
+			if ok {
+				result[key] = resource
+			}
+		} else {
+			val := getValue(f, filters, options)
+			result[key] = val
 
-				if ok {
-					result[key] = resource
+			if isReference(f) {
+				if filters.Contains(key) || recursive {
+					uri := getReferenceURI(f)
+					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
+
+					if ok {
+						result[key] = resource
+					}
 				}
 			}
 		}
+
 	}
 
 	return result
@@ -178,15 +209,25 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
-			if isReference(current) && (filters.Contains(parentKey) || recursive) {
-				uri := getReferenceURI(current)
-				resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
-				if ok {
-					result = append(result, resource)
+			if (filters.Contains(parentKey) || recursive) {
+				if isReference(current) {
+					uri := getReferenceURI(current)
+					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
+
+					if ok {
+						result = append(result, resource)
+					}
+				} else if isMongoDBRef(current) {
+					uri := buildReferenceURI(current)
+					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
+
+					if ok {
+						result = append(result, resource)
+					}
+				} else {
+					result = append(result, getValue(current, filters, options))
 				}
-			} else {
-				result = append(result, getValue(current, filters, options))
 			}
 		}
 
@@ -203,7 +244,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 	case reflect.Struct:
 		return walkByExpansion(t, filters, recursive)
 	default:
-		fmt.Println("Ugh.. Unsupported type!")
+		return t.Interface()
 	}
 
 	return ""
@@ -249,6 +290,47 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 	}
 
 	return result
+}
+
+func buildReferenceURI(t reflect.Value) string {
+	var uri string
+
+	if t.Kind() == reflect.Struct {
+		collection := ""
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			ft := t.Type().Field(i)
+
+			if ft.Name == COLLECTION_KEY {
+				collection = f.String()
+			} else {
+				objectId, ok := f.Interface().(ObjectId)
+				if ok {
+					base := ExpanderConfig.IdURIs[collection]
+					uri = base + "/" + objectId.Hex()
+				}
+			}
+		}
+	}
+
+	return uri
+}
+
+func isMongoDBRef(t reflect.Value) bool {
+	mongoEnabled := ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) > 0
+
+	if t.Kind() == reflect.Struct {
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+
+			_, ok := f.Interface().(ObjectId)
+			if ok {
+				return true && mongoEnabled
+			}
+		}
+	}
+
+	return false
 }
 
 func isRefKey(ft reflect.StructField) bool {

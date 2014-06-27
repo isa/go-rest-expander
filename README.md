@@ -151,6 +151,23 @@ Filter default is showing all results, and expansion default is expanding nothin
 
 As you can see, it's just my weekend project. So feel free to give feedback or open issues. I'll try my best to fix them in ASAP.
 
+## Mongo DBRef Expansions
+
+I also added a functionality for expanding mongo DBRef fields as well. So if you are using `mgo`, you can easily expand and resolve the Mongo references as well. To do so, you need to set the configuration like:
+
+```go
+expander.ExpanderConfig = expander.Configuration{
+   UsingMongo: true,
+   IdURIs: map[string]string {
+      "people": "http://localhost:9000/contacts/id",
+   },
+}
+```
+
+Here `IdURIs` is basically a map of collection -> base URI of your resources. I added another example named `example_mongo` in the project directory. You can check it as well for understanding how it works. It's pretty simple.
+
+By default, it won't expand mongo references.
+
 ## Installation
 
 ```bash
