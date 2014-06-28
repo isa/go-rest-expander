@@ -15,16 +15,11 @@ build:
         code: |
           cd $WERCKER_SOURCE_DIR
           go version
-          go get ./...
-
-    # Build the project
-    - script:
-        name: go build
-        code: |
-          go build ./...
+          go get -t github.com/smartystreets/goconvey
 
     # Test the project
     - script:
         name: go test
         code: |
-          go test ./...
+          cd $WERCKER_SOURCE_DIR/expander
+          go test -v
