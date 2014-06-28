@@ -2,7 +2,7 @@
 
 A tiny library to allow your RESTful resources to be expanded and/or filtered. If you don't know what resource expansions are, I'd recommend reading [Linking and Resource Expansion](https://stormpath.com/blog/linking-and-resource-expansion-rest-api-tips/) from *StormPath* blog. Although I have a different implementation, it's still a good read...
 
-[![wercker status](https://app.wercker.com/status/9daffd357de5205f4f9e5f185dda36a8/m "wercker status")](https://app.wercker.com/project/bykey/9daffd357de5205f4f9e5f185dda36a8)
+[![wercker status](https://app.wercker.com/status/9daffd357de5205f4f9e5f185dda36a8/s "wercker status")](https://app.wercker.com/project/bykey/9daffd357de5205f4f9e5f185dda36a8)
 
 My implementation is basically as following. Assuming you have below contact detail:
 
