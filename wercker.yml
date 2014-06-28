@@ -1,6 +1,8 @@
-box: wercker/golang
+box: wercker/golang@1.2.0
+
 # Build definition
 build:
+
   # The steps that will be executed on build
   steps:
     # Sets the go workspace and places you package
