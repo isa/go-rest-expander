@@ -87,8 +87,9 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	}
 
 	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
-	fmt.Println(expanded)
-	return walkByFilter(expanded, fieldFilter)
+	filtered := walkByFilter(expanded, fieldFilter)
+
+	return filtered
 }
 
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
@@ -104,12 +105,16 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 			subFilters := filters.Get(k).Children
 			ft := reflect.ValueOf(v)
 
+			if v == nil {
+				continue
+			}
+
 			switch ft.Type().Kind() {
 			case reflect.Map:
 				result[k] = walkByFilter(v.(map[string]interface{}), subFilters)
 			case reflect.Slice:
 				if ft.Len() == 0 {
-					return result
+					continue
 				}
 
 				switch ft.Index(0).Kind() {
@@ -169,11 +174,17 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		}
 
 		if isMongoDBRef(f) {
-			uri := buildReferenceURI(f)
-			resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
+			if filters.Contains(key) || recursive {
+				uri := buildReferenceURI(f)
+				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 
-			if ok {
-				result[key] = resource
+				if ok && len(resource) > 0 {
+					result[key] = resource
+				} else {
+					result[key] = f.Interface()
+				}
+			} else {
+				result[key] = f.Interface()
 			}
 		} else {
 			val := getValue(f, filters, options)
@@ -216,7 +227,6 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
 
-			fmt.Println(i, "--", filters, recursive)
 			if (filters.Contains(parentKey) || recursive) {
 				if isReference(current) {
 					uri := getReferenceURI(current)
@@ -231,6 +241,8 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 					if ok {
 						result = append(result, resource)
+					} else {
+						result = append(result, current.Interface())
 					}
 				} else {
 					result = append(result, getValue(current, filters, options))
@@ -333,13 +345,19 @@ func buildReferenceURI(t reflect.Value) string {
 func isMongoDBRef(t reflect.Value) bool {
 	mongoEnabled := ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) > 0
 
-	if t.Kind() == reflect.Struct && mongoEnabled {
+	if !mongoEnabled {
+		return false
+	}
+
+	if t.Kind() == reflect.Struct {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 
-			_, ok := f.Interface().(ObjectId)
-			if ok {
-				return true
+			if f.CanInterface() {
+				_, ok := f.Interface().(ObjectId)
+				if ok {
+					return true
+				}
 			}
 		}
 	}
@@ -357,7 +375,7 @@ func isReference(t reflect.Value) bool {
 		for i := 0; i < t.NumField(); i++ {
 			ft := t.Type().Field(i)
 
-			if isRefKey(ft) {
+			if isRefKey(ft) && t.NumField() > 1 { // at least relation & ref should be given
 				return true
 			}
 		}
@@ -370,7 +388,7 @@ func hasReference(m map[string]interface{}) bool {
 	for _, v := range m {
 		ft := reflect.TypeOf(v)
 
-		if ft.Kind() == reflect.Map {
+		if ft != nil && ft.Kind() == reflect.Map {
 			child := v.(map[string]interface{})
 			_, ok := child[REF_KEY]
 
