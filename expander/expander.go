@@ -87,7 +87,7 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	}
 
 	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
-//	fmt.Println(expanded)
+	fmt.Println(expanded)
 	return walkByFilter(expanded, fieldFilter)
 }
 
@@ -216,6 +216,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
 
+			fmt.Println(i, "--", filters, recursive)
 			if (filters.Contains(parentKey) || recursive) {
 				if isReference(current) {
 					uri := getReferenceURI(current)
@@ -234,6 +235,8 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 				} else {
 					result = append(result, getValue(current, filters, options))
 				}
+			} else {
+				result = append(result, getValue(current, filters, options))
 			}
 		}
 
