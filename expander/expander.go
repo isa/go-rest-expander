@@ -234,6 +234,8 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 					if ok {
 						result = append(result, resource)
+					} else {
+						result = append(result, current.Interface())
 					}
 				} else if isMongoDBRef(current) {
 					uri := buildReferenceURI(current)
@@ -245,10 +247,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 						result = append(result, current.Interface())
 					}
 				} else {
-					result = append(result, getValue(current, filters, options))
+					result = append(result, getValue(current, filters.Get(parentKey).Children, options))
 				}
 			} else {
-				result = append(result, getValue(current, filters, options))
+				result = append(result, getValue(current, filters.Get(parentKey).Children, options))
 			}
 		}
 
@@ -350,6 +352,10 @@ func isMongoDBRef(t reflect.Value) bool {
 	}
 
 	if t.Kind() == reflect.Struct {
+		if t.NumField() != 3 {
+			return false
+		}
+
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 
