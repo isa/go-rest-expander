@@ -87,6 +87,7 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	}
 
 	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
+//	fmt.Println(expanded)
 	return walkByFilter(expanded, fieldFilter)
 }
 
@@ -107,6 +108,10 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 			case reflect.Map:
 				result[k] = walkByFilter(v.(map[string]interface{}), subFilters)
 			case reflect.Slice:
+				if ft.Len() == 0 {
+					return result
+				}
+
 				switch ft.Index(0).Kind() {
 				case reflect.Map:
 					children := make([]map[string]interface{}, 0)

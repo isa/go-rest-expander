@@ -265,6 +265,17 @@ func TestExpander(t *testing.T) {
 			}
 		})
 
+		Convey("Filtering should return a map with empty list on multilevel single objects if empty list given", func() {
+			expectedMap := make(map[string]interface{})
+			expectedMap["SI"] = []int{}
+			filters := Filters{}
+
+			result := walkByFilter(expectedMap, filters)
+			si := result["SI"].([]int)
+
+			So(len(si), ShouldEqual, 0)
+		})
+
 		Convey("Filtering should return a map with only selected fields on simple-multilevel objects based on the modification tree", func() {
 			expectedMap := make(map[string]interface{})
 			expectedMap["S"] = "a string"
