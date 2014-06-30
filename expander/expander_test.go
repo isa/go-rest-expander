@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"encoding/json"
 	"reflect"
+	"time"
 	. "github.com/smartystreets/goconvey/convey"
 	"testing"
 )
@@ -34,6 +35,18 @@ func TestExpander(t *testing.T) {
 			So(result["I"], ShouldEqual, expectedMap["I"])
 			So(result["F"], ShouldEqual, expectedMap["F"])
 			So(result["UI"], ShouldEqual, expectedMap["UI"])
+		})
+
+		Convey("Walking the type should return a map of all the visible simple key-values that user defines if expand is *", func() {
+			simpleWithTime := SimpleWithTime{Name: "foo", Time: time.Now()}
+			expectedMap := make(map[string]string)
+			expectedMap["Name"] = simpleWithTime.Name
+			expectedMap["Time"] = simpleWithTime.Time.String()
+
+			result := Expand(simpleWithTime, "*", "")
+
+			So(result["Name"], ShouldEqual, expectedMap["Name"])
+			So(result["Time"], ShouldEqual, expectedMap["Time"])
 		})
 
 		Convey("Walking the type should assume expansion is * if no expansion parameter is given and return all the simple key-values that user defines", func() {
@@ -479,8 +492,7 @@ func TestExpander(t *testing.T) {
 
 			result := Expand(simple, "*", "")
 			mongoRef := result["Ref"].(map[string]interface{})
-
-			So(result["Name"], ShouldEqual, simple.Name)
+			So(result["name"], ShouldEqual, simple.Name)
 			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
 			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
 			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
@@ -493,7 +505,7 @@ func TestExpander(t *testing.T) {
 			result := Expand(simple, "*", "")
 			mongoRef := result["Ref"].(map[string]interface{})
 
-			So(result["Name"], ShouldEqual, simple.Name)
+			So(result["name"], ShouldEqual, simple.Name)
 			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
 			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
 			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
@@ -506,7 +518,7 @@ func TestExpander(t *testing.T) {
 			result := Expand(simple, "*", "")
 			mongoRef := result["Ref"].(map[string]interface{})
 
-			So(result["Name"], ShouldEqual, simple.Name)
+			So(result["name"], ShouldEqual, simple.Name)
 			So(mongoRef["Collection"], ShouldEqual, simple.Ref.Collection)
 			So(mongoRef["Id"], ShouldEqual, simple.Ref.Id)
 			So(mongoRef["Database"], ShouldEqual, simple.Ref.Database)
@@ -527,7 +539,7 @@ func TestExpander(t *testing.T) {
 			result := Expand(simple, "*", "")
 			mongoRef := result["Ref"].(map[string]interface{})
 
-			So(result["Name"], ShouldEqual, simple.Name)
+			So(result["name"], ShouldEqual, simple.Name)
 			So(mongoRef["Name"], ShouldEqual, info.Name)
 			So(mongoRef["Age"], ShouldEqual, info.Age)
 
@@ -766,8 +778,13 @@ type SimpleWithLinks struct {
 }
 
 type SimpleWithDBRef struct {
+	Name string `json:"name,omitempty"`
+	Ref DBRef `json: "ref", bson: "ref"`
+}
+
+type SimpleWithTime struct {
 	Name string
-	Ref DBRef
+	Time time.Time
 }
 
 type SimpleWithMultipleDBRefs struct {

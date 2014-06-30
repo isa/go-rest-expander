@@ -154,8 +154,9 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		ft := v.Type().Field(i)
 
 		key := ft.Name
-		if ft.Tag.Get("json") != "" {
-			key = ft.Tag.Get("json")
+		tag := ft.Tag.Get("json")
+		if tag != "" {
+			key = strings.Split(tag, ",")[0]
 		}
 
 		options := func() (bool, string) {
@@ -242,6 +243,11 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 		return result
 	case reflect.Struct:
+		val, ok := t.Interface().(fmt.Stringer)
+		if ok {
+			return val.String()
+		}
+
 		return walkByExpansion(t, filters, recursive)
 	default:
 		return t.Interface()
@@ -319,13 +325,13 @@ func buildReferenceURI(t reflect.Value) string {
 func isMongoDBRef(t reflect.Value) bool {
 	mongoEnabled := ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) > 0
 
-	if t.Kind() == reflect.Struct {
+	if t.Kind() == reflect.Struct && mongoEnabled {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 
 			_, ok := f.Interface().(ObjectId)
 			if ok {
-				return true && mongoEnabled
+				return true
 			}
 		}
 	}
@@ -334,7 +340,8 @@ func isMongoDBRef(t reflect.Value) bool {
 }
 
 func isRefKey(ft reflect.StructField) bool {
-	return ft.Name == REF_KEY || ft.Tag.Get("json") == REF_KEY
+	tag := strings.Split(ft.Tag.Get("json"), ",")[0]
+	return ft.Name == REF_KEY || tag == REF_KEY
 }
 
 func isReference(t reflect.Value) bool {

@@ -198,7 +198,7 @@ Or if you are lazy like me, just copy paste following and then you are good to g
 package main
 
 import (
-   "github.com/isa/rest-resource-expander/expander"
+   "github.com/isa/go-rest-expander/expander"
    "fmt"
    "encoding/json"
    "net/http"
