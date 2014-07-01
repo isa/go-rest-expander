@@ -12,23 +12,23 @@ import (
 )
 
 const (
-	REF_KEY  = "ref"
-	REL_KEY  = "rel"
-	VERB_KEY = "verb"
+	REF_KEY        = "ref"
+	REL_KEY        = "rel"
+	VERB_KEY       = "verb"
 	COLLECTION_KEY = "Collection"
 )
 
 type Configuration struct {
 	UsingMongo bool
-	IdURIs map[string]string
+	IdURIs     map[string]string
 }
 
-var ExpanderConfig Configuration = Configuration{UsingMongo:false}
+var ExpanderConfig Configuration = Configuration{UsingMongo: false}
 
 type DBRef struct {
 	Collection string
-	Id interface{}
-	Database string
+	Id         interface{}
+	Database   string
 }
 
 type ObjectId interface {
@@ -158,6 +158,9 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 	case reflect.Value:
 		v = data.(reflect.Value)
 	}
+	if v.Type().Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
 
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
@@ -227,7 +230,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
 
-			if (filters.Contains(parentKey) || recursive) {
+			if filters.Contains(parentKey) || recursive {
 				if isReference(current) {
 					uri := getReferenceURI(current)
 					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
@@ -453,7 +456,6 @@ func buildFilterTree(statement string) ([]Filter, int) {
 	}
 
 	statement = strings.Replace(statement, " ", "", -1)
-
 	if len(statement) == 0 {
 		return result, -1
 	}
