@@ -1,13 +1,13 @@
 package expander
 
 import (
-	"fmt"
-	"net/url"
 	"encoding/json"
-	"reflect"
-	"time"
+	"fmt"
 	. "github.com/smartystreets/goconvey/convey"
+	"net/url"
+	"reflect"
 	"testing"
+	"time"
 )
 
 func TestExpander(t *testing.T) {
@@ -280,11 +280,11 @@ func TestExpander(t *testing.T) {
 			expectedMap := make(map[string]interface{})
 			expectedMap["S"] = "a string"
 			expectedChildren := make([]map[string]interface{}, 0)
-			expectedChildren = append(expectedChildren, map[string]interface{} {
+			expectedChildren = append(expectedChildren, map[string]interface{}{
 				"key1": "value1",
 				"key2": 0,
 			})
-			expectedChildren = append(expectedChildren, map[string]interface{} {
+			expectedChildren = append(expectedChildren, map[string]interface{}{
 				"key1": "value2",
 				"key2": 1,
 			})
@@ -417,7 +417,7 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Identifying should return false when field doesn't have a hypermedia link", func() {
-			m := map[string]interface{} {
+			m := map[string]interface{}{
 				"a_key": "something",
 			}
 
@@ -427,11 +427,11 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Identifying should return true when field has a hypermedia link", func() {
-			m := map[string]interface{} {
+			m := map[string]interface{}{
 				"a_key": "something",
-				"a_link": map[string]interface{} {
-					"ref": "http://valid",
-					"rel": "a-relation",
+				"a_link": map[string]interface{}{
+					"ref":  "http://valid",
+					"rel":  "a-relation",
 					"verb": "GET",
 				},
 			}
@@ -442,13 +442,13 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Identifying should return true when nested field has a hypermedia link", func() {
-			m := map[string]interface{} {
+			m := map[string]interface{}{
 				"a_key": "something",
-				"another_key": map[string]interface{} {
+				"another_key": map[string]interface{}{
 					"some-id": "333",
-					"a_link": map[string]interface{} {
-						"ref": "http://valid",
-						"rel": "a-relation",
+					"a_link": map[string]interface{}{
+						"ref":  "http://valid",
+						"rel":  "a-relation",
 						"verb": "GET",
 					},
 				},
@@ -460,11 +460,11 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Identifying should return false when nested field doesn't have a hypermedia link", func() {
-			m := map[string]interface{} {
+			m := map[string]interface{}{
 				"a_key": "something",
-				"another_key": map[string]interface{} {
+				"another_key": map[string]interface{}{
 					"some-id": "333",
-					"another_type": map[string]interface{} {
+					"another_type": map[string]interface{}{
 						"something": "yeap",
 					},
 				},
@@ -558,7 +558,7 @@ func TestExpander(t *testing.T) {
 		})
 
 		Convey("Fetching should return a list of underlying values when Mongo flag is set to true with proper IdURIs", func() {
-			simple := SimpleWithMultipleDBRefs {
+			simple := SimpleWithMultipleDBRefs{
 				Name: "foo",
 				Refs: []DBRef{
 					{"a collection", MongoId("123"), "a database"},
@@ -566,8 +566,8 @@ func TestExpander(t *testing.T) {
 				},
 			}
 			info := Info{"A name", 100}
-			uris := map[string]string {
-				"a collection": "http://some-uri/id",
+			uris := map[string]string{
+				"a collection":       "http://some-uri/id",
 				"another collection": "http://some-other-uri/id",
 			}
 
@@ -642,7 +642,7 @@ func TestExpander(t *testing.T) {
 				Link{"http://valid2", "relation2", "GET"},
 			}
 
-			info := []Info {
+			info := []Info{
 				Info{"A name", 100},
 				Info{"Another name", 200},
 			}
@@ -681,7 +681,7 @@ func TestExpander(t *testing.T) {
 			index := 0
 			getContentFrom = func(url *url.URL) string {
 				var result []byte
-				if (index > 0) {
+				if index > 0 {
 					result, _ = json.Marshal(info)
 					return string(result)
 				}
@@ -732,7 +732,7 @@ func TestExpander(t *testing.T) {
 			singleLevel := SimpleSingleLevel{S: "one", L: link1}
 			info := Info{"A name", 100}
 			simpleWithLinks := SimpleWithLinks{
-				Name: "lorem",
+				Name:    "lorem",
 				Members: []Link{link1, link2},
 			}
 
@@ -741,7 +741,7 @@ func TestExpander(t *testing.T) {
 			getContentFrom = func(url *url.URL) string {
 				var result []byte
 				index = index + 1
-				if (index % 2 == 0) {
+				if index%2 == 0 {
 					result, _ = json.Marshal(info)
 					return string(result)
 				}
@@ -767,8 +767,8 @@ func TestExpander(t *testing.T) {
 }
 
 type Link struct {
-	Ref string `json:"ref"`
-	Rel string `json:"rel"`
+	Ref  string `json:"ref"`
+	Rel  string `json:"rel"`
 	Verb string `json:"verb"`
 }
 
@@ -780,17 +780,17 @@ func (m MongoId) Hex() string {
 
 type Info struct {
 	Name string
-	Age int
+	Age  int
 }
 
 type SimpleWithLinks struct {
-	Name string
+	Name    string
 	Members []Link
 }
 
 type SimpleWithDBRef struct {
 	Name string `json:"name,omitempty"`
-	Ref DBRef `json: "ref", bson: "ref"`
+	Ref  DBRef  `json: "ref", bson: "ref"`
 }
 
 type SimpleWithTime struct {

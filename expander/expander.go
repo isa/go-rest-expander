@@ -101,9 +101,14 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 
 	for k, v := range data {
 		if filters.IsEmpty() || filters.Contains(k) {
+			ft := reflect.ValueOf(v)
+			// if ft.Kind() == reflect.Ptr {
+			// 	ft = ft.Elem()
+			// 	v = ft.Interface()
+			// }
+
 			result[k] = v
 			subFilters := filters.Get(k).Children
-			ft := reflect.ValueOf(v)
 
 			if v == nil {
 				continue
@@ -165,6 +170,10 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Field(i)
 		ft := v.Type().Field(i)
+
+		if f.Kind() == reflect.Ptr {
+			f = f.Elem()
+		}
 
 		key := ft.Name
 		tag := ft.Tag.Get("json")
