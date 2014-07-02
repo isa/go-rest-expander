@@ -41,7 +41,8 @@ func TestExpander(t *testing.T) {
 			simpleWithTime := SimpleWithTime{Name: "foo", Time: time.Now()}
 			expectedMap := make(map[string]string)
 			expectedMap["Name"] = simpleWithTime.Name
-			expectedMap["Time"] = simpleWithTime.Time.String()
+			time, _ := simpleWithTime.Time.MarshalJSON()
+			expectedMap["Time"] = string(time)
 
 			result := Expand(simpleWithTime, "*", "")
 

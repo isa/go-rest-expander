@@ -277,9 +277,13 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 		return result
 	case reflect.Struct:
-		val, ok := t.Interface().(fmt.Stringer)
+		val, ok := t.Interface().(json.Marshaler)
 		if ok {
-			return val.String()
+			bytes, err := val.(json.Marshaler).MarshalJSON()
+			if err != nil {
+				fmt.Println(err)
+			}
+			return string(bytes)
 		}
 
 		return walkByExpansion(t, filters, recursive)
