@@ -6,6 +6,7 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 	"net/url"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -41,8 +42,9 @@ func TestExpander(t *testing.T) {
 			simpleWithTime := SimpleWithTime{Name: "foo", Time: time.Now()}
 			expectedMap := make(map[string]string)
 			expectedMap["Name"] = simpleWithTime.Name
-			time, _ := simpleWithTime.Time.MarshalJSON()
-			expectedMap["Time"] = string(time)
+			t, _ := simpleWithTime.Time.MarshalJSON()
+			time, _ := strconv.Unquote(string(t))
+			expectedMap["Time"] = time
 
 			result := Expand(simpleWithTime, "*", "")
 

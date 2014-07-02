@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -102,10 +103,6 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	for k, v := range data {
 		if filters.IsEmpty() || filters.Contains(k) {
 			ft := reflect.ValueOf(v)
-			// if ft.Kind() == reflect.Ptr {
-			// 	ft = ft.Elem()
-			// 	v = ft.Interface()
-			// }
 
 			result[k] = v
 			subFilters := filters.Get(k).Children
@@ -201,6 +198,13 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		} else {
 			val := getValue(f, filters, options)
 			result[key] = val
+			switch val.(type) {
+			case string:
+				unquoted, err := strconv.Unquote(val.(string))
+				if err == nil {
+					result[key] = unquoted
+				}
+			}
 
 			if isReference(f) {
 				if filters.Contains(key) || recursive {
@@ -283,6 +287,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			if err != nil {
 				fmt.Println(err)
 			}
+
 			return string(bytes)
 		}
 
