@@ -323,7 +323,9 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 	for key, v := range m {
 		ft := reflect.TypeOf(v)
 		result[key] = v
-
+		if v == nil {
+			continue
+		}
 		if ft.Kind() == reflect.Map && (recursive || filters.Contains(key)) {
 			child := v.(map[string]interface{})
 			uri, found := child[REF_KEY]
