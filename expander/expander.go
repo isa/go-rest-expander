@@ -93,6 +93,45 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	return filtered
 }
 
+func ExpandArray(data interface{}, expansion, fields string) []interface{} {
+	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
+		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
+	}
+
+	var recursiveExpansion bool
+	fieldFilter, _ := buildFilterTree(fields)
+	expansionFilter, _ := buildFilterTree(expansion)
+
+	if expansion == "*" {
+		recursiveExpansion = true
+	}
+
+	var result []interface{}
+
+	if data == nil {
+		return result
+	}
+
+	v := reflect.ValueOf(data)
+	switch data.(type) {
+	case reflect.Value:
+		v = data.(reflect.Value)
+	}
+
+	if v.Kind() != reflect.Slice {
+		return result
+	}
+
+	v = v.Slice(0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		arrayItem := walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
+		arrayItem = walkByFilter(arrayItem, fieldFilter)
+		result = append(result, arrayItem)
+	}
+	return result
+}
+
+
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -162,6 +201,14 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 	}
 	if v.Type().Kind() == reflect.Ptr {
 		v = v.Elem()
+	}
+
+	// check if root is db ref
+	if isMongoDBRef(v) {
+		uri := buildReferenceURI(v)
+		key := v.Type().Field(1).Name
+		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
+		return resource
 	}
 
 	for i := 0; i < v.NumField(); i++ {
