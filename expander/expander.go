@@ -131,6 +131,7 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 	return result
 }
 
+
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -200,6 +201,14 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 	}
 	if v.Type().Kind() == reflect.Ptr {
 		v = v.Elem()
+	}
+
+	// check if root is db ref
+	if isMongoDBRef(v) {
+		uri := buildReferenceURI(v)
+		key := v.Type().Field(1).Name
+		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
+		return resource
 	}
 
 	for i := 0; i < v.NumField(); i++ {
