@@ -204,7 +204,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 	}
 
 	// check if root is db ref
-	if isMongoDBRef(v) {
+	if isMongoDBRef(v) && recursive {
 		uri := buildReferenceURI(v)
 		key := v.Type().Field(1).Name
 		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
