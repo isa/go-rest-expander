@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -30,6 +31,15 @@ type DBRef struct {
 	Collection string
 	Id         interface{}
 	Database   string
+}
+
+// AsMap returns this DBRef with it's three fields in form of a map[string]interface{}
+func (this *DBRef) AsMap() map[string]interface{} {
+	result := make(map[string]interface{})
+	result["Collection"] = this.Collection
+	result["Id"] = this.Id
+	result["Database"] = this.Database
+	return result
 }
 
 type ObjectId interface {
@@ -73,6 +83,9 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
+//TODO remove global waitGroup and inject
+var waitGroup = sync.WaitGroup{}
+
 //TODO: TagFields & BSONFields
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
@@ -88,6 +101,7 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	}
 
 	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion)
+	waitGroup.Wait()
 	filtered := walkByFilter(expanded, fieldFilter)
 
 	return filtered
@@ -125,6 +139,7 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 	v = v.Slice(0, v.Len())
 	for i := 0; i < v.Len(); i++ {
 		arrayItem := *walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
+		waitGroup.Wait()
 		arrayItem = walkByFilter(arrayItem, fieldFilter)
 		result = append(result, arrayItem)
 	}
@@ -161,23 +176,23 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 				switch ft.Index(0).Kind() {
 				case reflect.Map:
 					children := make([]map[string]interface{}, 0)
-					for _, child := range v.([]map[string]interface{}) {
-						item := walkByFilter(child, subFilters)
-						children = append(children, item)
-					}
+				for _, child := range v.([]map[string]interface{}) {
+					item := walkByFilter(child, subFilters)
+					children = append(children, item)
+				}
 					result[k] = children
 				default:
 					children := make([]interface{}, 0)
-					for _, child := range v.([]interface{}) {
-						cft := reflect.TypeOf(child)
+				for _, child := range v.([]interface{}) {
+					cft := reflect.TypeOf(child)
 
-						if cft.Kind() == reflect.Map {
-							item := walkByFilter(child.(map[string]interface{}), subFilters)
-							children = append(children, item)
-						} else {
-							children = append(children, child)
-						}
+					if cft.Kind() == reflect.Map {
+						item := walkByFilter(child.(map[string]interface{}), subFilters)
+						children = append(children, item)
+					} else {
+						children = append(children, child)
 					}
+				}
 					result[k] = children
 				}
 			}
@@ -207,8 +222,16 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[str
 	if isMongoDBRef(v) && recursive {
 		uri := buildReferenceURI(v)
 		key := v.Type().Field(1).Name
-		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
-		return &resource
+		placeholder := make(map[string]interface{})
+		waitGroup.Add(1)
+		go func(mPlaceHolder *map[string]interface{}) {
+			resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
+			for k, v := range resource {
+				(*mPlaceHolder)[k] = v
+			}
+			waitGroup.Done()
+		}(&placeholder)
+		return &placeholder
 	}
 
 	for i := 0; i < v.NumField(); i++ {
@@ -232,13 +255,15 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[str
 		if isMongoDBRef(f) {
 			if filters.Contains(key) || recursive {
 				uri := buildReferenceURI(f)
-				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
-
-				if ok && len(resource) > 0 {
-					result[key] = resource
-				} else {
-					result[key] = f.Interface()
-				}
+				result[key] = f.Interface()
+				waitGroup.Add(1)
+				go func(mResult *map[string]interface{}) {
+					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
+					if ok && len(resource) > 0 {
+						(*mResult)[key] = resource
+					}
+					waitGroup.Done()
+				}(&result)
 			} else {
 				result[key] = f.Interface()
 			}
@@ -256,11 +281,14 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[str
 			if isReference(f) {
 				if filters.Contains(key) || recursive {
 					uri := getReferenceURI(f)
-					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
-
-					if ok {
-						result[key] = resource
-					}
+					waitGroup.Add(1)
+					go func(mResult *map[string]interface{}) {
+						resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
+						if ok {
+							(*mResult)[key] = resource
+						}
+						waitGroup.Done()
+					}(&result)
 				}
 			}
 		}
@@ -293,22 +321,30 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			if filters.Contains(parentKey) || recursive {
 				if isReference(current) {
 					uri := getReferenceURI(current)
-					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
-					if ok {
-						result = append(result, resource)
-					} else {
-						result = append(result, current.Interface())
-					}
+					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
+					result = append(result, current.Interface())
+					waitGroup.Add(1)
+					go func(mIndex int) {
+						resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
+						if ok {
+							result[mIndex] = resource
+						}
+						waitGroup.Done()
+					}(i)
 				} else if isMongoDBRef(current) {
 					uri := buildReferenceURI(current)
-					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
-					if ok {
-						result = append(result, resource)
-					} else {
-						result = append(result, current.Interface())
-					}
+					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
+					result = append(result, current.Interface())
+					waitGroup.Add(1)
+					go func(mIndex int) {
+						resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
+						if ok {
+							result[mIndex] = resource
+						}
+						waitGroup.Done()
+					}(i)
 				} else {
 					result = append(result, getValue(current, filters.Get(parentKey).Children, options))
 				}
@@ -321,10 +357,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 	case reflect.Map:
 		result := make(map[string]interface{})
 
-		for _, v := range t.MapKeys() {
-			key := v.Interface().(string)
-			result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
-		}
+	for _, v := range t.MapKeys() {
+		key := v.Interface().(string)
+		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
+	}
 
 		return result
 	case reflect.Struct:
@@ -357,14 +393,14 @@ func getResourceFrom(u string, filters Filters, recursive bool) (map[string]inte
 		ok = true
 
 		if hasReference(m) {
-			return expandChildren(m, filters, recursive), ok
+			return *expandChildren(m, filters, recursive), ok
 		}
 	}
 
 	return m, ok
 }
 
-func expandChildren(m map[string]interface{}, filters Filters, recursive bool) map[string]interface{} {
+func expandChildren(m map[string]interface{}, filters Filters, recursive bool) *map[string]interface{} {
 	result := make(map[string]interface{})
 
 	for key, v := range m {
@@ -387,7 +423,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 		}
 	}
 
-	return result
+	return &result
 }
 
 func buildReferenceURI(t reflect.Value) string {
@@ -405,7 +441,7 @@ func buildReferenceURI(t reflect.Value) string {
 				objectId, ok := f.Interface().(ObjectId)
 				if ok {
 					base := ExpanderConfig.IdURIs[collection]
-					uri = base + "/" + objectId.Hex()
+					uri = base+"/"+objectId.Hex()
 				}
 			}
 		}
@@ -536,22 +572,22 @@ func buildFilterTree(statement string) ([]Filter, int) {
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			filter.Children, closeIndex = buildFilterTree(statement[i+1:])
 			result = append(result, filter)
-			i = i + closeIndex
-			indexAfterSeparation = i + 1
+			i = i+closeIndex
+			indexAfterSeparation = i+1
 			closeIndex = indexAfterSeparation
 		case comma:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
-			indexAfterSeparation = i + 1
+			indexAfterSeparation = i+1
 		case closeBracket:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
 
-			return result, i + 1
+			return result, i+1
 		}
 	}
 
