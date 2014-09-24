@@ -83,9 +83,6 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
-//TODO remove global waitGroup and inject
-var waitGroup = sync.WaitGroup{}
-
 //TODO: TagFields & BSONFields
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
@@ -99,8 +96,8 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if expansion == "*" {
 		recursiveExpansion = true
 	}
-
-	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion)
+	waitGroup := &sync.WaitGroup{}
+	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion, waitGroup)
 	waitGroup.Wait()
 	filtered := walkByFilter(expanded, fieldFilter)
 
@@ -138,7 +135,8 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 
 	v = v.Slice(0, v.Len())
 	for i := 0; i < v.Len(); i++ {
-		arrayItem := *walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
+		waitGroup := &sync.WaitGroup{}
+		arrayItem := *walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion, waitGroup)
 		waitGroup.Wait()
 		arrayItem = walkByFilter(arrayItem, fieldFilter)
 		result = append(result, arrayItem)
@@ -202,7 +200,7 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	return result
 }
 
-func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[string]interface{} {
+func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGroup *sync.WaitGroup) *map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
@@ -268,7 +266,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[str
 				result[key] = f.Interface()
 			}
 		} else {
-			val := getValue(f, filters, options)
+			val := getValue(f, filters, options, waitGroup)
 			result[key] = val
 			switch val.(type) {
 			case string:
@@ -298,7 +296,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[str
 	return &result
 }
 
-func getValue(t reflect.Value, filters Filters, options func() (bool, string)) interface{} {
+func getValue(t reflect.Value, filters Filters, options func() (bool, string), waitGroup *sync.WaitGroup) interface{} {
 	recursive, parentKey := options()
 
 	switch t.Kind() {
@@ -346,10 +344,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 						waitGroup.Done()
 					}(i)
 				} else {
-					result = append(result, getValue(current, filters.Get(parentKey).Children, options))
+					result = append(result, getValue(current, filters.Get(parentKey).Children, options, waitGroup))
 				}
 			} else {
-				result = append(result, getValue(current, filters.Get(parentKey).Children, options))
+				result = append(result, getValue(current, filters.Get(parentKey).Children, options, waitGroup))
 			}
 		}
 
@@ -359,7 +357,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 
 	for _, v := range t.MapKeys() {
 		key := v.Interface().(string)
-		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
+		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options, waitGroup)
 	}
 
 		return result
@@ -374,7 +372,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			return string(bytes)
 		}
 
-		return *walkByExpansion(t, filters, recursive)
+		return *walkByExpansion(t, filters, recursive, waitGroup)
 	default:
 		return t.Interface()
 	}
@@ -414,6 +412,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) *
 			uri, found := child[REF_KEY]
 
 			if found {
+
 				resource, ok := getResourceFrom(uri.(string), filters, recursive)
 
 				if ok {
