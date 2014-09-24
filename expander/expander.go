@@ -87,7 +87,7 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 		recursiveExpansion = true
 	}
 
-	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
+	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion)
 	filtered := walkByFilter(expanded, fieldFilter)
 
 	return filtered
@@ -124,7 +124,7 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 
 	v = v.Slice(0, v.Len())
 	for i := 0; i < v.Len(); i++ {
-		arrayItem := walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
+		arrayItem := *walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
 		arrayItem = walkByFilter(arrayItem, fieldFilter)
 		result = append(result, arrayItem)
 	}
@@ -187,11 +187,11 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	return result
 }
 
-func walkByExpansion(data interface{}, filters Filters, recursive bool) map[string]interface{} {
+func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
-		return result
+		return &result
 	}
 
 	v := reflect.ValueOf(data)
@@ -208,7 +208,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		uri := buildReferenceURI(v)
 		key := v.Type().Field(1).Name
 		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
-		return resource
+		return &resource
 	}
 
 	for i := 0; i < v.NumField(); i++ {
@@ -267,7 +267,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 
 	}
 
-	return result
+	return &result
 }
 
 func getValue(t reflect.Value, filters Filters, options func() (bool, string)) interface{} {
@@ -338,7 +338,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			return string(bytes)
 		}
 
-		return walkByExpansion(t, filters, recursive)
+		return *walkByExpansion(t, filters, recursive)
 	default:
 		return t.Interface()
 	}
