@@ -75,8 +75,7 @@ func (m Filters) Get(v string) Filter {
 }
 
 func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFilter Filters, recursiveExpansion bool) {
-	var recursiveExpansion bool
-	fieldFilter, _ := buildFilterTree(fields)
+	fieldFilter, _ = buildFilterTree(fields)
 
 	if expansion != "*" {
 		expansionFilter, _ = buildFilterTree(expansion)
@@ -217,13 +216,13 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 		key := v.Type().Field(1).Name
 		placeholder := make(map[string]interface{})
 		waitGroup.Add(1)
-		go func(mPlaceHolder *map[string]interface{}) {
+		go func() {
 			resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
 			for k, v := range resource {
-				(*mPlaceHolder)[k] = v
+				placeholder[k] = v
 			}
 			waitGroup.Done()
-		}(&placeholder)
+		}()
 		return &placeholder
 	}
 
@@ -250,13 +249,13 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 				uri := buildReferenceURI(f)
 				result[key] = f.Interface()
 				waitGroup.Add(1)
-				go func(mResult *map[string]interface{}) {
+				go func() {
 					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 					if ok && len(resource) > 0 {
-						(*mResult)[key] = resource
+						result[key] = resource
 					}
 					waitGroup.Done()
-				}(&result)
+				}()
 			} else {
 				result[key] = f.Interface()
 			}
@@ -275,13 +274,13 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 				if filters.Contains(key) || recursive {
 					uri := getReferenceURI(f)
 					waitGroup.Add(1)
-					go func(mResult *map[string]interface{}) {
+					go func() {
 						resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 						if ok {
-							(*mResult)[key] = resource
+							result[key] = resource
 						}
 						waitGroup.Done()
-					}(&result)
+					}()
 				}
 			}
 		}
