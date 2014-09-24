@@ -74,17 +74,27 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
+func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFilter Filters, recursiveExpansion bool) {
+	var recursiveExpansion bool
+	fieldFilter, _ := buildFilterTree(fields)
+
+	if expansion != "*" {
+		expansionFilter, _ = buildFilterTree(expansion)
+	}else if fields != "*" && fields != "" {
+		expansionFilter, _ = buildFilterTree(fields)
+	}else {
+		recursiveExpansion = true
+	}
+	return
+}
+
 //TODO: TagFields & BSONFields
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
-	var recursiveExpansion bool
-	fieldFilter, _ := buildFilterTree(fields)
-	expansionFilter, _ := buildFilterTree(expansion)
-	if expansion == "*" {
-		recursiveExpansion = true
-	}
+
+	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
 
 	waitGroup := &sync.WaitGroup{}
 	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion, waitGroup)
@@ -100,13 +110,7 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
 
-	var recursiveExpansion bool
-	fieldFilter, _ := buildFilterTree(fields)
-	expansionFilter, _ := buildFilterTree(expansion)
-
-	if expansion == "*" {
-		recursiveExpansion = true
-	}
+	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
 
 	var result []interface{}
 
