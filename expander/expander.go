@@ -33,15 +33,6 @@ type DBRef struct {
 	Database   string
 }
 
-// AsMap returns this DBRef with it's three fields in form of a map[string]interface{}
-func (this *DBRef) AsMap() map[string]interface{} {
-	result := make(map[string]interface{})
-	result["Collection"] = this.Collection
-	result["Id"] = this.Id
-	result["Database"] = this.Database
-	return result
-}
-
 type ObjectId interface {
 	Hex() string
 }
@@ -88,17 +79,17 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
-
 	var recursiveExpansion bool
 	fieldFilter, _ := buildFilterTree(fields)
 	expansionFilter, _ := buildFilterTree(expansion)
-
 	if expansion == "*" {
 		recursiveExpansion = true
 	}
+
 	waitGroup := &sync.WaitGroup{}
 	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion, waitGroup)
 	waitGroup.Wait()
+
 	filtered := walkByFilter(expanded, fieldFilter)
 
 	return filtered
@@ -412,9 +403,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) *
 			uri, found := child[REF_KEY]
 
 			if found {
-
 				resource, ok := getResourceFrom(uri.(string), filters, recursive)
-
 				if ok {
 					result[key] = resource
 				}
@@ -530,7 +519,6 @@ func getReferenceURI(t reflect.Value) string {
 
 var getContentFrom = func(uri *url.URL) string {
 	response, err := http.Get(uri.String())
-
 	if err != nil {
 		fmt.Println(err)
 		return ""
