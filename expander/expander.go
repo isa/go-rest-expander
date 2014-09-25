@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"github.com/golang/groupcache/lru"
+	"time"
 )
 
 const (
@@ -21,11 +23,24 @@ const (
 )
 
 type Configuration struct {
-	UsingMongo bool
+	UsingCache                       bool
+	UsingMongo                       bool
 	IdURIs     map[string]string
+	CacheExpInSeconds                int64
 }
 
-var ExpanderConfig Configuration = Configuration{UsingMongo: false}
+var ExpanderConfig Configuration = Configuration{
+	UsingMongo: false,
+	UsingCache: false,
+	CacheExpInSeconds: 86400, // = 24 hours
+}
+
+var Cache *lru.Cache = lru.New(250)
+
+type CacheEntry struct{
+	Timestamp int64
+	Data      string
+}
 
 type DBRef struct {
 	Collection string
@@ -92,6 +107,9 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
+	if ExpanderConfig.UsingCache && ExpanderConfig.CacheExpInSeconds == 0 {
+		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
+	}
 
 	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
 
@@ -107,6 +125,9 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
+	}
+	if ExpanderConfig.UsingCache && ExpanderConfig.CacheExpInSeconds == 0 {
+		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
 	}
 
 	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
@@ -520,7 +541,7 @@ func getReferenceURI(t reflect.Value) string {
 	return ""
 }
 
-var getContentFrom = func(uri *url.URL) string {
+var makeGetCall = func(uri *url.URL) string {
 	response, err := http.Get(uri.String())
 	if err != nil {
 		fmt.Println(err)
@@ -535,7 +556,42 @@ var getContentFrom = func(uri *url.URL) string {
 		os.Exit(1)
 	}
 
+
 	return string(contents)
+}
+
+var makeGetCallAndAddToCache = func(uri *url.URL) string {
+	valueToReturn := makeGetCall(uri)
+	cacheEntry := CacheEntry{
+		Timestamp: time.Now().Unix(),
+		Data: valueToReturn,
+	}
+	Cache.Add(uri.String(), cacheEntry)
+	return valueToReturn
+}
+
+var getContentFrom = func(uri *url.URL) string {
+
+	if ExpanderConfig.UsingCache {
+		value, ok := Cache.Get(uri.String())
+		if !ok {
+			//no data found in cache
+			return makeGetCallAndAddToCache(uri)
+		}
+
+		cachedData := value.(CacheEntry)
+		nowInMillis := time.Now().Unix()
+
+		if nowInMillis-cachedData.Timestamp > ExpanderConfig.CacheExpInSeconds {
+			//data older then Expiration
+			Cache.Remove(uri.String())
+			return makeGetCallAndAddToCache(uri)
+		}
+
+		return cachedData.Data
+	}
+
+	return makeGetCall(uri)
 }
 
 func buildFilterTree(statement string) ([]Filter, int) {
