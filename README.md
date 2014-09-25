@@ -300,7 +300,20 @@ func main() {
 
    select {}
 }
+
 ```
+## Caching
+
+Expander includes a caching mechanism to cache HTTP-calls. It is **deactivated by default**, to activate it just add the following to your configuration:
+
+```go
+expander.ExpanderConfig = expander.Configuration{
+   UsingCache: true,
+   CacheExpInSeconds: 86400, // 24h
+   ...
+}
+```
+CacheExpInSeconds is the maximum time that an entry is cached.
 
 ## Developers
 
