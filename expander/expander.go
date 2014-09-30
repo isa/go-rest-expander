@@ -3,6 +3,7 @@ package expander
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/golang/groupcache/lru"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -11,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"github.com/golang/groupcache/lru"
 	"time"
 )
 
@@ -23,21 +23,21 @@ const (
 )
 
 type Configuration struct {
-	UsingCache                       bool
-	UsingMongo                       bool
-	IdURIs     map[string]string
-	CacheExpInSeconds                int64
+	UsingCache        bool
+	UsingMongo        bool
+	IdURIs            map[string]string
+	CacheExpInSeconds int64
 }
 
 var ExpanderConfig Configuration = Configuration{
-	UsingMongo: false,
-	UsingCache: false,
+	UsingMongo:        false,
+	UsingCache:        false,
 	CacheExpInSeconds: 86400, // = 24 hours
 }
 
 var Cache *lru.Cache = lru.New(250)
 
-type CacheEntry struct{
+type CacheEntry struct {
 	Timestamp int64
 	Data      string
 }
@@ -94,9 +94,9 @@ func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFil
 
 	if expansion != "*" {
 		expansionFilter, _ = buildFilterTree(expansion)
-	}else if fields != "*" && fields != "" {
+	} else if fields != "*" && fields != "" {
 		expansionFilter, _ = buildFilterTree(fields)
-	}else {
+	} else {
 		recursiveExpansion = true
 	}
 	return
@@ -159,7 +159,6 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 	return result
 }
 
-
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
 	result := make(map[string]interface{})
 
@@ -189,23 +188,23 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 				switch ft.Index(0).Kind() {
 				case reflect.Map:
 					children := make([]map[string]interface{}, 0)
-				for _, child := range v.([]map[string]interface{}) {
-					item := walkByFilter(child, subFilters)
-					children = append(children, item)
-				}
+					for _, child := range v.([]map[string]interface{}) {
+						item := walkByFilter(child, subFilters)
+						children = append(children, item)
+					}
 					result[k] = children
 				default:
 					children := make([]interface{}, 0)
-				for _, child := range v.([]interface{}) {
-					cft := reflect.TypeOf(child)
+					for _, child := range v.([]interface{}) {
+						cft := reflect.TypeOf(child)
 
-					if cft.Kind() == reflect.Map {
-						item := walkByFilter(child.(map[string]interface{}), subFilters)
-						children = append(children, item)
-					} else {
-						children = append(children, child)
+						if cft.Kind() == reflect.Map {
+							item := walkByFilter(child.(map[string]interface{}), subFilters)
+							children = append(children, item)
+						} else {
+							children = append(children, child)
+						}
 					}
-				}
 					result[k] = children
 				}
 			}
@@ -370,10 +369,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string), w
 	case reflect.Map:
 		result := make(map[string]interface{})
 
-	for _, v := range t.MapKeys() {
-		key := v.Interface().(string)
-		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options, waitGroup)
-	}
+		for _, v := range t.MapKeys() {
+			key := v.Interface().(string)
+			result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options, waitGroup)
+		}
 
 		return result
 	case reflect.Struct:
@@ -402,9 +401,11 @@ func getResourceFrom(u string, filters Filters, recursive bool) (map[string]inte
 
 	if err == nil {
 		content := getContentFrom(uri)
-		_ = json.Unmarshal([]byte(content), &m)
+		err := json.Unmarshal([]byte(content), &m)
+		if err != nil {
+			return m, false
+		}
 		ok = true
-
 		if hasReference(m) {
 			return *expandChildren(m, filters, recursive), ok
 		}
@@ -453,7 +454,7 @@ func buildReferenceURI(t reflect.Value) string {
 				objectId, ok := f.Interface().(ObjectId)
 				if ok {
 					base := ExpanderConfig.IdURIs[collection]
-					uri = base+"/"+objectId.Hex()
+					uri = base + "/" + objectId.Hex()
 				}
 			}
 		}
@@ -556,7 +557,6 @@ var makeGetCall = func(uri *url.URL) string {
 		os.Exit(1)
 	}
 
-
 	return string(contents)
 }
 
@@ -564,7 +564,7 @@ var makeGetCallAndAddToCache = func(uri *url.URL) string {
 	valueToReturn := makeGetCall(uri)
 	cacheEntry := CacheEntry{
 		Timestamp: time.Now().Unix(),
-		Data: valueToReturn,
+		Data:      valueToReturn,
 	}
 	Cache.Add(uri.String(), cacheEntry)
 	return valueToReturn
@@ -618,22 +618,22 @@ func buildFilterTree(statement string) ([]Filter, int) {
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			filter.Children, closeIndex = buildFilterTree(statement[i+1:])
 			result = append(result, filter)
-			i = i+closeIndex
-			indexAfterSeparation = i+1
+			i = i + closeIndex
+			indexAfterSeparation = i + 1
 			closeIndex = indexAfterSeparation
 		case comma:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
-			indexAfterSeparation = i+1
+			indexAfterSeparation = i + 1
 		case closeBracket:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
 
-			return result, i+1
+			return result, i + 1
 		}
 	}
 
