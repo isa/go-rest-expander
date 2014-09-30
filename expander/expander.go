@@ -553,8 +553,7 @@ var makeGetCall = func(uri *url.URL) string {
 	contents, err := ioutil.ReadAll(response.Body)
 
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fmt.Println("We were exiting here but we shouldn't. Error was: " + err)
 	}
 
 	return string(contents)
