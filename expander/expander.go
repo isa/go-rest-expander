@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -553,7 +552,7 @@ var makeGetCall = func(uri *url.URL) string {
 	contents, err := ioutil.ReadAll(response.Body)
 
 	if err != nil {
-		fmt.Println("We were exiting here but we shouldn't. Error was: " + err)
+		fmt.Println("Error while reading content of response body. It was: ", err)
 	}
 
 	return string(contents)
