@@ -35,7 +35,6 @@ var ExpanderConfig Configuration = Configuration{
 }
 
 var Cache *lru.Cache = lru.New(250)
-var CacheMutex = sync.Mutex{}
 
 type CacheEntry struct {
 	Timestamp int64
@@ -188,23 +187,23 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 				switch ft.Index(0).Kind() {
 				case reflect.Map:
 					children := make([]map[string]interface{}, 0)
-				for _, child := range v.([]map[string]interface{}) {
-					item := walkByFilter(child, subFilters)
-					children = append(children, item)
-				}
+					for _, child := range v.([]map[string]interface{}) {
+						item := walkByFilter(child, subFilters)
+						children = append(children, item)
+					}
 					result[k] = children
 				default:
 					children := make([]interface{}, 0)
-				for _, child := range v.([]interface{}) {
-					cft := reflect.TypeOf(child)
+					for _, child := range v.([]interface{}) {
+						cft := reflect.TypeOf(child)
 
-					if cft.Kind() == reflect.Map {
-						item := walkByFilter(child.(map[string]interface{}), subFilters)
-						children = append(children, item)
-					} else {
-						children = append(children, child)
+						if cft.Kind() == reflect.Map {
+							item := walkByFilter(child.(map[string]interface{}), subFilters)
+							children = append(children, item)
+						} else {
+							children = append(children, child)
+						}
 					}
-				}
 					result[k] = children
 				}
 			}
@@ -228,13 +227,6 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 	}
 	if v.Type().Kind() == reflect.Ptr {
 		v = v.Elem()
-	}
-
-	var resultWriteMutex = sync.Mutex{}
-	var writeToResult = func(key string, value interface{}) {
-		resultWriteMutex.Lock()
-		result[key] = value
-		resultWriteMutex.Unlock()
 	}
 
 	// check if root is db ref
@@ -274,26 +266,26 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 		if isMongoDBRef(f) {
 			if filters.Contains(key) || recursive {
 				uri := buildReferenceURI(f)
-				writeToResult(key, f.Interface())
+				result[key] = f.Interface()
 				waitGroup.Add(1)
 				go func() {
 					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 					if ok && len(resource) > 0 {
-						writeToResult(key, resource)
+						result[key] = resource
 					}
 					waitGroup.Done()
 				}()
 			} else {
-				writeToResult(key, f.Interface())
+				result[key] = f.Interface()
 			}
 		} else {
 			val := getValue(f, filters, options, waitGroup)
-			writeToResult(key, val)
+			result[key] = val
 			switch val.(type) {
 			case string:
 				unquoted, err := strconv.Unquote(val.(string))
 				if err == nil {
-					writeToResult(key, unquoted)
+					result[key] = unquoted
 				}
 			}
 
@@ -304,7 +296,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 					go func() {
 						resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 						if ok {
-							writeToResult(key, resource)
+							result[key] = resource
 						}
 						waitGroup.Done()
 					}()
@@ -376,10 +368,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string), w
 	case reflect.Map:
 		result := make(map[string]interface{})
 
-	for _, v := range t.MapKeys() {
-		key := v.Interface().(string)
-		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options, waitGroup)
-	}
+		for _, v := range t.MapKeys() {
+			key := v.Interface().(string)
+			result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options, waitGroup)
+		}
 
 		return result
 	case reflect.Struct:
@@ -461,7 +453,7 @@ func buildReferenceURI(t reflect.Value) string {
 				objectId, ok := f.Interface().(ObjectId)
 				if ok {
 					base := ExpanderConfig.IdURIs[collection]
-					uri = base+"/"+objectId.Hex()
+					uri = base + "/" + objectId.Hex()
 				}
 			}
 		}
@@ -572,18 +564,14 @@ var makeGetCallAndAddToCache = func(uri *url.URL) string {
 		Timestamp: time.Now().Unix(),
 		Data:      valueToReturn,
 	}
-	CacheMutex.Lock()
 	Cache.Add(uri.String(), cacheEntry)
-	CacheMutex.Unlock()
 	return valueToReturn
 }
 
 var getContentFrom = func(uri *url.URL) string {
 
 	if ExpanderConfig.UsingCache {
-		CacheMutex.Lock()
 		value, ok := Cache.Get(uri.String())
-		CacheMutex.Unlock()
 		if !ok {
 			//no data found in cache
 			return makeGetCallAndAddToCache(uri)
@@ -594,9 +582,7 @@ var getContentFrom = func(uri *url.URL) string {
 
 		if nowInMillis-cachedData.Timestamp > ExpanderConfig.CacheExpInSeconds {
 			//data older then Expiration
-			CacheMutex.Lock()
 			Cache.Remove(uri.String())
-			CacheMutex.Unlock()
 			return makeGetCallAndAddToCache(uri)
 		}
 
@@ -630,22 +616,22 @@ func buildFilterTree(statement string) ([]Filter, int) {
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			filter.Children, closeIndex = buildFilterTree(statement[i+1:])
 			result = append(result, filter)
-			i = i+closeIndex
-			indexAfterSeparation = i+1
+			i = i + closeIndex
+			indexAfterSeparation = i + 1
 			closeIndex = indexAfterSeparation
 		case comma:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
-			indexAfterSeparation = i+1
+			indexAfterSeparation = i + 1
 		case closeBracket:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
 
-			return result, i+1
+			return result, i + 1
 		}
 	}
 
