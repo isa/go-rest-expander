@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 	"net"
+	"errors"
 )
 
 const (
@@ -109,7 +110,16 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
-func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFilter Filters, recursiveExpansion bool) {
+func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFilter Filters, recursiveExpansion bool, err error) {
+	if !validateFilterFormat(expansion) {
+		err = errors.New("expansionFilter for filtering was not correct")
+		return
+	}
+	if !validateFilterFormat(fields) {
+		err = errors.New("fieldFilter for filtering was not correct")
+		return
+	}
+
 	fieldFilter, _ = buildFilterTree(fields)
 
 	if expansion != "*" {
@@ -131,7 +141,12 @@ func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
 	}
 
-	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
+	expansionFilter, fieldFilter, recursiveExpansion, err := resolveFilters(expansion, fields)
+	if err != nil {
+		expansionFilter = Filters{}
+		fieldFilter = Filters{}
+		fmt.Printf("Warning: Filter was not correct, expansionFilter: '%v' fieldFilter: '%v', error: %v \n", expansion, fields, err)
+	}
 
 	waitGroup := &sync.WaitGroup{}
 	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion, waitGroup)
@@ -150,7 +165,12 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
 	}
 
-	expansionFilter, fieldFilter, recursiveExpansion := resolveFilters(expansion, fields)
+	expansionFilter, fieldFilter, recursiveExpansion, err := resolveFilters(expansion, fields)
+	if err != nil {
+		expansionFilter = Filters{}
+		fieldFilter = Filters{}
+		fmt.Printf("Warning: Filter was not correct, expansionFilter: '%v' fieldFilter: '%v', error: %v \n", expansionFilter, fieldFilter, err)
+	}
 
 	var result []interface{}
 
@@ -263,7 +283,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 		key := v.Type().Field(1).Name
 		placeholder := make(map[string]interface{})
 		waitGroup.Add(1)
-		go func() {
+		func() {
 			resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
 			for k, v := range resource {
 				placeholder[k] = v
@@ -296,7 +316,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 				uri := buildReferenceURI(f)
 				writeToResult(key, f.Interface())
 				waitGroup.Add(1)
-				go func() {
+				func() {
 					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 					if ok && len(resource) > 0 {
 						writeToResult(key, resource)
@@ -321,7 +341,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool, waitGrou
 				if filters.Contains(key) || recursive {
 					uri := getReferenceURI(f)
 					waitGroup.Add(1)
-					go func() {
+					func() {
 						resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
 						if ok {
 							writeToResult(key, resource)
@@ -364,7 +384,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string), w
 					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
 					result = append(result, current.Interface())
 					waitGroup.Add(1)
-					go func(mIndex int) {
+					func(mIndex int) {
 						resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 						if ok {
 							result[mIndex] = resource
@@ -377,7 +397,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string), w
 					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
 					result = append(result, current.Interface())
 					waitGroup.Add(1)
-					go func(mIndex int) {
+					func(mIndex int) {
 						resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 						if ok {
 							result[mIndex] = resource
@@ -642,6 +662,25 @@ var getContentFrom = func(uri *url.URL) string {
 	}
 
 	return makeGetCall(uri)
+}
+
+func validateFilterFormat(filter string) bool {
+	runes := []rune(filter)
+
+	var bracketCounter = 0
+
+	for i := range runes {
+		if runes[i] == '(' {
+			bracketCounter++
+		}else if runes[i] == ')' {
+			bracketCounter--
+			if bracketCounter < 0 {
+				return false
+			}
+		}
+	}
+	return bracketCounter == 0
+
 }
 
 func buildFilterTree(statement string) ([]Filter, int) {

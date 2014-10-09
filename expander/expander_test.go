@@ -597,6 +597,39 @@ func TestExpander(t *testing.T) {
 
 		})
 
+	Convey("It should detect invalid filters and return data untouched", t, func() {
+			Convey("Open brackets should be handled as invalid filter and not expand", func() {
+					singleLevel := SimpleSingleLevel{L: Link{Ref: "http://valid", Rel: "nothing", Verb: "GET"}}
+					info := Info{"A name", 100}
+
+					mockedFn := getContentFrom
+					getContentFrom = func(url *url.URL) string {
+						result, _ := json.Marshal(info)
+						return string(result)
+					}
+
+					result := Expand(singleLevel, "*,((", "")
+					actual := result["L"].(map[string]interface{})
+
+					//still same after expansion, because filter is invalid
+					So(actual["ref"], ShouldEqual, singleLevel.L.Ref)
+
+					getContentFrom = mockedFn
+				})
+
+			Convey("open brackets shouldbe handled as invalid filter and not apply filter", func() {
+					singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
+
+					result := Expand(singleLevel, "", "S, I,((")
+
+					So(result["S"], ShouldEqual, singleLevel.S)
+					So(result["I"], ShouldEqual, singleLevel.I)
+					So(result["B"], ShouldEqual, singleLevel.B)
+					So(result["F"], ShouldEqual, singleLevel.F)
+					So(result["UI"], ShouldEqual, singleLevel.UI)
+				})
+		})
+
 	Convey("It should fetch the underlying data from the URIs during expansion:", t, func() {
 			Convey("Fetching should return the same value when non-URI data structure given", func() {
 					singleLevel := SimpleSingleLevel{L: Link{Ref: "non-URI", Rel: "nothing", Verb: "GET"}}
