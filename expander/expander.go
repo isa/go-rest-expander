@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"net"
 )
 
 const (
@@ -22,20 +23,39 @@ const (
 )
 
 type Configuration struct {
-	UsingCache        bool
-	UsingMongo        bool
+	UsingCache           bool
+	UsingMongo           bool
 	IdURIs            map[string]string
-	CacheExpInSeconds int64
+	CacheExpInSeconds    int64
+	ConnectionTimeoutInS int
 }
 
 var ExpanderConfig Configuration = Configuration{
 	UsingMongo:        false,
 	UsingCache:        false,
 	CacheExpInSeconds: 86400, // = 24 hours
+	ConnectionTimeoutInS: 2,
 }
 
 var Cache *lru.Cache = lru.New(250)
 var CacheMutex = sync.Mutex{}
+var client http.Client
+var timeout = time.Duration(2 * time.Second)
+var httpClientIsInitialized = false
+var initializingHttpClient = false
+var initializerMutex = sync.Mutex{}
+
+func dialTimeout(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, timeout)
+}
+
+func Init() {
+	client = http.Client{}
+
+	client.Timeout = time.Duration(ExpanderConfig.ConnectionTimeoutInS)*time.Second
+
+	httpClientIsInitialized = true
+}
 
 type CacheEntry struct {
 	Timestamp int64
@@ -550,7 +570,16 @@ func getReferenceURI(t reflect.Value) string {
 }
 
 var makeGetCall = func(uri *url.URL) string {
-	response, err := http.Get(uri.String())
+	if !httpClientIsInitialized {
+		initializerMutex.Lock()
+		if !initializingHttpClient {
+			initializingHttpClient = true
+			Init()
+		}
+		initializerMutex.Unlock()
+	}
+
+	response, err := client.Get(uri.String())
 	if err != nil {
 		fmt.Println(err)
 		return ""
@@ -568,6 +597,15 @@ var makeGetCall = func(uri *url.URL) string {
 
 var makeGetCallAndAddToCache = func(uri *url.URL) string {
 	valueToReturn := makeGetCall(uri)
+
+	var responseMap map[string]interface{}
+	err := json.Unmarshal([]byte(valueToReturn), &responseMap)
+
+	_, ok := responseMap["error"]
+	if err != nil || ok {
+		return ""
+	}
+
 	cacheEntry := CacheEntry{
 		Timestamp: time.Now().Unix(),
 		Data:      valueToReturn,
@@ -578,8 +616,8 @@ var makeGetCallAndAddToCache = func(uri *url.URL) string {
 	return valueToReturn
 }
 
-var getContentFrom = func(uri *url.URL) string {
 
+var getContentFrom = func(uri *url.URL) string {
 	if ExpanderConfig.UsingCache {
 		CacheMutex.Lock()
 		value, ok := Cache.Get(uri.String())
