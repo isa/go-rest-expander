@@ -388,6 +388,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 				result = append(result, getValue(current, filters.Get(parentKey).Children, options))
 			}
 		}
+		if len(result) == 0 {
+			// return empty array of string, because empty array of interface is replaced with "null" by json.Marshall
+			return []struct{}{}
+		}
 
 		return result
 	case reflect.Map:
