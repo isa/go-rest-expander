@@ -310,6 +310,7 @@ Expander includes a caching mechanism to cache HTTP-calls. It is **deactivated b
 expander.ExpanderConfig = expander.Configuration{
    UsingCache: true,
    CacheExpInSeconds: 86400, // 24h
+   ConnectionTimeoutInS = 2,
    ...
 }
 ```
