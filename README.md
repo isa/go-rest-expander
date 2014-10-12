@@ -314,7 +314,7 @@ expander.ExpanderConfig = expander.Configuration{
    ...
 }
 ```
-CacheExpInSeconds is the maximum time that an entry is cached.
+CacheExpInSeconds is the maximum time that an entry is cached. ConnectionTimeoutInS is the time until a http-request is canceled
 
 ## Developers
 

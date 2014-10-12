@@ -16,6 +16,7 @@ build:
           cd $WERCKER_SOURCE_DIR
           go version
           go get -t github.com/smartystreets/goconvey
+          go get -t github.com/golang/groupcache/lru
 
     # Test the project
     - script:

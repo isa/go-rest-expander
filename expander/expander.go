@@ -3,7 +3,6 @@ package expander
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/golang/groupcache/lru"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -14,6 +13,8 @@ import (
 	"time"
 	"net"
 	"errors"
+
+	"github.com/golang/groupcache/lru"
 )
 
 const (
@@ -357,7 +358,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 	case reflect.String:
 		return t.String()
 	case reflect.Slice:
-		var result []interface{}
+		var result = []interface{}{}
 
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
@@ -387,10 +388,6 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			} else {
 				result = append(result, getValue(current, filters.Get(parentKey).Children, options))
 			}
-		}
-		if len(result) == 0 {
-			// return empty array of string, because empty array of interface is replaced with "null" by json.Marshall
-			return []struct{}{}
 		}
 
 		return result
