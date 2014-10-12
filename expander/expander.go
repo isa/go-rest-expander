@@ -6,10 +6,15 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
+	"net"
+	"errors"
+
+	"github.com/golang/groupcache/lru"
 )
 
 const (
@@ -20,11 +25,44 @@ const (
 )
 
 type Configuration struct {
-	UsingMongo bool
-	IdURIs     map[string]string
+	UsingCache           bool
+	UsingMongo           bool
+	IdURIs            map[string]string
+	CacheExpInSeconds    int64
+	ConnectionTimeoutInS int
 }
 
-var ExpanderConfig Configuration = Configuration{UsingMongo: false}
+var ExpanderConfig Configuration = Configuration{
+	UsingMongo:        false,
+	UsingCache:        false,
+	CacheExpInSeconds: 86400, // = 24 hours
+	ConnectionTimeoutInS: 2,
+}
+
+var Cache *lru.Cache = lru.New(250)
+var CacheMutex = sync.Mutex{}
+var client http.Client
+var timeout = time.Duration(2 * time.Second)
+var httpClientIsInitialized = false
+var initializingHttpClient = false
+var initializerMutex = sync.Mutex{}
+
+func dialTimeout(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, timeout)
+}
+
+func Init() {
+	client = http.Client{}
+
+	client.Timeout = time.Duration(ExpanderConfig.ConnectionTimeoutInS)*time.Second
+
+	httpClientIsInitialized = true
+}
+
+type CacheEntry struct {
+	Timestamp int64
+	Data      string
+}
 
 type DBRef struct {
 	Collection string
@@ -73,21 +111,46 @@ func (m Filters) Get(v string) Filter {
 	return result
 }
 
+func resolveFilters(expansion, fields string) (expansionFilter Filters, fieldFilter Filters, recursiveExpansion bool, err error) {
+	if !validateFilterFormat(expansion) {
+		err = errors.New("expansionFilter for filtering was not correct")
+		return
+	}
+	if !validateFilterFormat(fields) {
+		err = errors.New("fieldFilter for filtering was not correct")
+		return
+	}
+
+	fieldFilter, _ = buildFilterTree(fields)
+
+	if expansion != "*" {
+		expansionFilter, _ = buildFilterTree(expansion)
+	} else if fields != "*" && fields != "" {
+		expansionFilter, _ = buildFilterTree(fields)
+	} else {
+		recursiveExpansion = true
+	}
+	return
+}
+
 //TODO: TagFields & BSONFields
 func Expand(data interface{}, expansion, fields string) map[string]interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
-
-	var recursiveExpansion bool
-	fieldFilter, _ := buildFilterTree(fields)
-	expansionFilter, _ := buildFilterTree(expansion)
-
-	if expansion == "*" {
-		recursiveExpansion = true
+	if ExpanderConfig.UsingCache && ExpanderConfig.CacheExpInSeconds == 0 {
+		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
 	}
 
-	expanded := walkByExpansion(data, expansionFilter, recursiveExpansion)
+	expansionFilter, fieldFilter, recursiveExpansion, err := resolveFilters(expansion, fields)
+	if err != nil {
+		expansionFilter = Filters{}
+		fieldFilter = Filters{}
+		fmt.Printf("Warning: Filter was not correct, expansionFilter: '%v' fieldFilter: '%v', error: %v \n", expansion, fields, err)
+	}
+
+	expanded := *walkByExpansion(data, expansionFilter, recursiveExpansion)
+
 	filtered := walkByFilter(expanded, fieldFilter)
 
 	return filtered
@@ -97,13 +160,15 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 	if ExpanderConfig.UsingMongo && len(ExpanderConfig.IdURIs) == 0 {
 		fmt.Println("Warning: Cannot use mongo flag without proper IdURIs given!")
 	}
+	if ExpanderConfig.UsingCache && ExpanderConfig.CacheExpInSeconds == 0 {
+		fmt.Println("Warning: Cannot use Cache with expiration 0, cache will be useless!")
+	}
 
-	var recursiveExpansion bool
-	fieldFilter, _ := buildFilterTree(fields)
-	expansionFilter, _ := buildFilterTree(expansion)
-
-	if expansion == "*" {
-		recursiveExpansion = true
+	expansionFilter, fieldFilter, recursiveExpansion, err := resolveFilters(expansion, fields)
+	if err != nil {
+		expansionFilter = Filters{}
+		fieldFilter = Filters{}
+		fmt.Printf("Warning: Filter was not correct, expansionFilter: '%v' fieldFilter: '%v', error: %v \n", expansionFilter, fieldFilter, err)
 	}
 
 	var result []interface{}
@@ -124,13 +189,12 @@ func ExpandArray(data interface{}, expansion, fields string) []interface{} {
 
 	v = v.Slice(0, v.Len())
 	for i := 0; i < v.Len(); i++ {
-		arrayItem := walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
+		arrayItem := *walkByExpansion(v.Index(i), expansionFilter, recursiveExpansion)
 		arrayItem = walkByFilter(arrayItem, fieldFilter)
 		result = append(result, arrayItem)
 	}
 	return result
 }
-
 
 func walkByFilter(data map[string]interface{}, filters Filters) map[string]interface{} {
 	result := make(map[string]interface{})
@@ -161,23 +225,23 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 				switch ft.Index(0).Kind() {
 				case reflect.Map:
 					children := make([]map[string]interface{}, 0)
-					for _, child := range v.([]map[string]interface{}) {
-						item := walkByFilter(child, subFilters)
-						children = append(children, item)
-					}
+				for _, child := range v.([]map[string]interface{}) {
+					item := walkByFilter(child, subFilters)
+					children = append(children, item)
+				}
 					result[k] = children
 				default:
 					children := make([]interface{}, 0)
-					for _, child := range v.([]interface{}) {
-						cft := reflect.TypeOf(child)
+				for _, child := range v.([]interface{}) {
+					cft := reflect.TypeOf(child)
 
-						if cft.Kind() == reflect.Map {
-							item := walkByFilter(child.(map[string]interface{}), subFilters)
-							children = append(children, item)
-						} else {
-							children = append(children, child)
-						}
+					if cft.Kind() == reflect.Map {
+						item := walkByFilter(child.(map[string]interface{}), subFilters)
+						children = append(children, item)
+					} else {
+						children = append(children, child)
 					}
+				}
 					result[k] = children
 				}
 			}
@@ -187,11 +251,11 @@ func walkByFilter(data map[string]interface{}, filters Filters) map[string]inter
 	return result
 }
 
-func walkByExpansion(data interface{}, filters Filters, recursive bool) map[string]interface{} {
+func walkByExpansion(data interface{}, filters Filters, recursive bool) *map[string]interface{} {
 	result := make(map[string]interface{})
 
 	if data == nil {
-		return result
+		return &result
 	}
 
 	v := reflect.ValueOf(data)
@@ -203,12 +267,23 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 		v = v.Elem()
 	}
 
+	//	var resultWriteMutex = sync.Mutex{}
+	var writeToResult = func(key string, value interface{}) {
+		//resultWriteMutex.Lock()
+		result[key] = value
+		//resultWriteMutex.Unlock()
+	}
+
 	// check if root is db ref
 	if isMongoDBRef(v) && recursive {
 		uri := buildReferenceURI(v)
 		key := v.Type().Field(1).Name
+		placeholder := make(map[string]interface{})
 		resource, _ := getResourceFrom(uri, filters.Get(key).Children, recursive)
-		return resource
+		for k, v := range resource {
+			placeholder[k] = v
+		}
+		return &placeholder
 	}
 
 	for i := 0; i < v.NumField(); i++ {
@@ -233,23 +308,22 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 			if filters.Contains(key) || recursive {
 				uri := buildReferenceURI(f)
 				resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
-
 				if ok && len(resource) > 0 {
-					result[key] = resource
-				} else {
-					result[key] = f.Interface()
+					writeToResult(key, resource)
+				}else {
+					writeToResult(key, f.Interface())
 				}
 			} else {
-				result[key] = f.Interface()
+				writeToResult(key, f.Interface())
 			}
 		} else {
 			val := getValue(f, filters, options)
-			result[key] = val
+			writeToResult(key, val)
 			switch val.(type) {
 			case string:
 				unquoted, err := strconv.Unquote(val.(string))
 				if err == nil {
-					result[key] = unquoted
+					writeToResult(key, unquoted)
 				}
 			}
 
@@ -257,9 +331,8 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 				if filters.Contains(key) || recursive {
 					uri := getReferenceURI(f)
 					resource, ok := getResourceFrom(uri, filters.Get(key).Children, recursive)
-
 					if ok {
-						result[key] = resource
+						writeToResult(key, resource)
 					}
 				}
 			}
@@ -267,7 +340,7 @@ func walkByExpansion(data interface{}, filters Filters, recursive bool) map[stri
 
 	}
 
-	return result
+	return &result
 }
 
 func getValue(t reflect.Value, filters Filters, options func() (bool, string)) interface{} {
@@ -285,7 +358,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 	case reflect.String:
 		return t.String()
 	case reflect.Slice:
-		var result []interface{}
+		var result = []interface{}{}
 
 		for i := 0; i < t.Len(); i++ {
 			current := t.Index(i)
@@ -293,21 +366,21 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			if filters.Contains(parentKey) || recursive {
 				if isReference(current) {
 					uri := getReferenceURI(current)
-					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
+					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
+					result = append(result, current.Interface())
+					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 					if ok {
-						result = append(result, resource)
-					} else {
-						result = append(result, current.Interface())
+						result[i] = resource
 					}
 				} else if isMongoDBRef(current) {
 					uri := buildReferenceURI(current)
-					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 
+					//TODO: this fails in case the resource cannot be resolved, because current is DBRef not map[string]interface{}
+					result = append(result, current.Interface())
+					resource, ok := getResourceFrom(uri, filters.Get(parentKey).Children, recursive)
 					if ok {
-						result = append(result, resource)
-					} else {
-						result = append(result, current.Interface())
+						result[i] = resource
 					}
 				} else {
 					result = append(result, getValue(current, filters.Get(parentKey).Children, options))
@@ -321,10 +394,10 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 	case reflect.Map:
 		result := make(map[string]interface{})
 
-		for _, v := range t.MapKeys() {
-			key := v.Interface().(string)
-			result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
-		}
+	for _, v := range t.MapKeys() {
+		key := v.Interface().(string)
+		result[key] = getValue(t.MapIndex(v), filters.Get(key).Children, options)
+	}
 
 		return result
 	case reflect.Struct:
@@ -338,7 +411,7 @@ func getValue(t reflect.Value, filters Filters, options func() (bool, string)) i
 			return string(bytes)
 		}
 
-		return walkByExpansion(t, filters, recursive)
+		return *walkByExpansion(t, filters, recursive)
 	default:
 		return t.Interface()
 	}
@@ -353,18 +426,20 @@ func getResourceFrom(u string, filters Filters, recursive bool) (map[string]inte
 
 	if err == nil {
 		content := getContentFrom(uri)
-		_ = json.Unmarshal([]byte(content), &m)
+		err := json.Unmarshal([]byte(content), &m)
+		if err != nil {
+			return m, false
+		}
 		ok = true
-
 		if hasReference(m) {
-			return expandChildren(m, filters, recursive), ok
+			return *expandChildren(m, filters, recursive), ok
 		}
 	}
 
 	return m, ok
 }
 
-func expandChildren(m map[string]interface{}, filters Filters, recursive bool) map[string]interface{} {
+func expandChildren(m map[string]interface{}, filters Filters, recursive bool) *map[string]interface{} {
 	result := make(map[string]interface{})
 
 	for key, v := range m {
@@ -379,7 +454,6 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 
 			if found {
 				resource, ok := getResourceFrom(uri.(string), filters, recursive)
-
 				if ok {
 					result[key] = resource
 				}
@@ -387,7 +461,7 @@ func expandChildren(m map[string]interface{}, filters Filters, recursive bool) m
 		}
 	}
 
-	return result
+	return &result
 }
 
 func buildReferenceURI(t reflect.Value) string {
@@ -405,7 +479,7 @@ func buildReferenceURI(t reflect.Value) string {
 				objectId, ok := f.Interface().(ObjectId)
 				if ok {
 					base := ExpanderConfig.IdURIs[collection]
-					uri = base + "/" + objectId.Hex()
+					uri = base+"/"+objectId.Hex()
 				}
 			}
 		}
@@ -493,9 +567,17 @@ func getReferenceURI(t reflect.Value) string {
 	return ""
 }
 
-var getContentFrom = func(uri *url.URL) string {
-	response, err := http.Get(uri.String())
+var makeGetCall = func(uri *url.URL) string {
+	if !httpClientIsInitialized {
+		initializerMutex.Lock()
+		if !initializingHttpClient {
+			initializingHttpClient = true
+			Init()
+		}
+		initializerMutex.Unlock()
+	}
 
+	response, err := client.Get(uri.String())
 	if err != nil {
 		fmt.Println(err)
 		return ""
@@ -505,11 +587,78 @@ var getContentFrom = func(uri *url.URL) string {
 	contents, err := ioutil.ReadAll(response.Body)
 
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fmt.Println("Error while reading content of response body. It was: ", err)
 	}
 
 	return string(contents)
+}
+
+var makeGetCallAndAddToCache = func(uri *url.URL) string {
+	valueToReturn := makeGetCall(uri)
+
+	var responseMap map[string]interface{}
+	err := json.Unmarshal([]byte(valueToReturn), &responseMap)
+
+	_, ok := responseMap["error"]
+	if err != nil || ok {
+		return ""
+	}
+
+	cacheEntry := CacheEntry{
+		Timestamp: time.Now().Unix(),
+		Data:      valueToReturn,
+	}
+	CacheMutex.Lock()
+	Cache.Add(uri.String(), cacheEntry)
+	CacheMutex.Unlock()
+	return valueToReturn
+}
+
+
+var getContentFrom = func(uri *url.URL) string {
+	if ExpanderConfig.UsingCache {
+		CacheMutex.Lock()
+		value, ok := Cache.Get(uri.String())
+		CacheMutex.Unlock()
+		if !ok {
+			//no data found in cache
+			return makeGetCallAndAddToCache(uri)
+		}
+
+		cachedData := value.(CacheEntry)
+		nowInMillis := time.Now().Unix()
+
+		if nowInMillis-cachedData.Timestamp > ExpanderConfig.CacheExpInSeconds {
+			//data older then Expiration
+			CacheMutex.Lock()
+			Cache.Remove(uri.String())
+			CacheMutex.Unlock()
+			return makeGetCallAndAddToCache(uri)
+		}
+
+		return cachedData.Data
+	}
+
+	return makeGetCall(uri)
+}
+
+func validateFilterFormat(filter string) bool {
+	runes := []rune(filter)
+
+	var bracketCounter = 0
+
+	for i := range runes {
+		if runes[i] == '(' {
+			bracketCounter++
+		}else if runes[i] == ')' {
+			bracketCounter--
+			if bracketCounter < 0 {
+				return false
+			}
+		}
+	}
+	return bracketCounter == 0
+
 }
 
 func buildFilterTree(statement string) ([]Filter, int) {
@@ -536,22 +685,22 @@ func buildFilterTree(statement string) ([]Filter, int) {
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			filter.Children, closeIndex = buildFilterTree(statement[i+1:])
 			result = append(result, filter)
-			i = i + closeIndex
-			indexAfterSeparation = i + 1
+			i = i+closeIndex
+			indexAfterSeparation = i+1
 			closeIndex = indexAfterSeparation
 		case comma:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
-			indexAfterSeparation = i + 1
+			indexAfterSeparation = i+1
 		case closeBracket:
 			filter := Filter{Value: string(statement[indexAfterSeparation:i])}
 			if filter.Value != "" {
 				result = append(result, filter)
 			}
 
-			return result, i + 1
+			return result, i+1
 		}
 	}
 

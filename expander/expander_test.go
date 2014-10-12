@@ -597,6 +597,39 @@ func TestExpander(t *testing.T) {
 
 		})
 
+	Convey("It should detect invalid filters and return data untouched", t, func() {
+			Convey("Open brackets should be handled as invalid filter and not expand", func() {
+					singleLevel := SimpleSingleLevel{L: Link{Ref: "http://valid", Rel: "nothing", Verb: "GET"}}
+					info := Info{"A name", 100}
+
+					mockedFn := getContentFrom
+					getContentFrom = func(url *url.URL) string {
+						result, _ := json.Marshal(info)
+						return string(result)
+					}
+
+					result := Expand(singleLevel, "*,((", "")
+					actual := result["L"].(map[string]interface{})
+
+					//still same after expansion, because filter is invalid
+					So(actual["ref"], ShouldEqual, singleLevel.L.Ref)
+
+					getContentFrom = mockedFn
+				})
+
+			Convey("open brackets shouldbe handled as invalid filter and not apply filter", func() {
+					singleLevel := SimpleSingleLevel{S: "bar", B: false, I: -1, F: 1.1, UI: 1}
+
+					result := Expand(singleLevel, "", "S, I,((")
+
+					So(result["S"], ShouldEqual, singleLevel.S)
+					So(result["I"], ShouldEqual, singleLevel.I)
+					So(result["B"], ShouldEqual, singleLevel.B)
+					So(result["F"], ShouldEqual, singleLevel.F)
+					So(result["UI"], ShouldEqual, singleLevel.UI)
+				})
+		})
+
 	Convey("It should fetch the underlying data from the URIs during expansion:", t, func() {
 			Convey("Fetching should return the same value when non-URI data structure given", func() {
 					singleLevel := SimpleSingleLevel{L: Link{Ref: "non-URI", Rel: "nothing", Verb: "GET"}}
@@ -840,6 +873,73 @@ func TestExpander(t *testing.T) {
 							getContentFrom = mockedFn
 						})
 				})
+			Convey("When caching is enabled, it should emit a second call to the same URI of a valid reference", func() {
+					ExpanderConfig.UsingCache = true
+					ExpanderConfig.CacheExpInSeconds = 86400
+					Convey("Fetching a valid Reference first time should make GET call and replace the data correctly", func() {
+							singleLevel := SimpleSingleLevel{L: Link{Ref: "http://valid", Rel: "nothing", Verb: "GET"}}
+							info := Info{"A name", 100}
+
+							mockedFn := getContentFrom
+							makeGetCall = func(url *url.URL) string {
+								result, _ := json.Marshal(info)
+								return string(result)
+							}
+
+							result := Expand(singleLevel, "*", "")
+							actual := result["L"].(map[string]interface{})
+
+							So(actual["Name"], ShouldEqual, info.Name)
+							So(actual["Age"], ShouldEqual, info.Age)
+
+							makeGetCall = mockedFn
+						})
+					Convey("Fetching a valid Reference second time should NOT make GET call and replace the data correctly", func() {
+							singleLevel := SimpleSingleLevel{L: Link{Ref: "http://valid", Rel: "nothing", Verb: "GET"}}
+							info := Info{"A name", 100}
+
+							mockedFn := getContentFrom
+							makeGetCall = func(url *url.URL) string {
+								//this should not be called, so return invalid data to make the test fail in case it is called:
+								return "INVALID_DATA"
+							}
+
+							result := Expand(singleLevel, "*", "")
+							actual := result["L"].(map[string]interface{})
+
+							So(actual["Name"], ShouldEqual, info.Name)
+							So(actual["Age"], ShouldEqual, info.Age)
+
+							makeGetCall = mockedFn
+						})
+					Convey("Fetching Reference second/third/... time should make GET call when cached data is older then 24h and replace the data correctly", func() {
+							uri := "http://valid"
+							singleLevel := SimpleSingleLevel{L: Link{Ref: uri, Rel: "nothing", Verb: "GET"}}
+							info := Info{"A name", 100}
+
+							expiredTimestamp := time.Now().Unix() - (ExpanderConfig.CacheExpInSeconds + 1)
+							invalidData := "INVALID_DATA"
+
+							Cache.Remove(uri)
+							Cache.Add(uri, CacheEntry{Timestamp: expiredTimestamp, Data: invalidData})
+
+
+							mockedFn := getContentFrom
+							makeGetCall = func(url *url.URL) string {
+								result, _ := json.Marshal(info)
+								return string(result)
+							}
+
+							result := Expand(singleLevel, "*", "")
+							actual := result["L"].(map[string]interface{})
+
+							So(actual["Name"], ShouldEqual, info.Name)
+							So(actual["Age"], ShouldEqual, info.Age)
+
+							makeGetCall = mockedFn
+						})
+				})
+			ExpanderConfig.UsingCache = false
 		})
 }
 
